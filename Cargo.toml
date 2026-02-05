@@ -13,6 +13,8 @@ ttf-parser = "0.25"
 owned_ttf_parser = "0.25"
 rustybuzz = "0.20"
 subsetter = "0.1"
+image = { version = "0.24", default-features = false, features = ["jpeg", "png"] }
+flate2 = "1.0"
 
 [build-dependencies]
 napi-build = "2.0"

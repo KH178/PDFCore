@@ -1,8 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Error, ErrorKind};
+use std::io::{self, Error, ErrorKind, Write};
 use crate::core::font::Font;
 use crate::core::page::Page;
+use crate::core::image::Image;
 use crate::core::writer::{PdfWriter, PdfObject};
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 
 /// Document operation mode
 pub enum DocumentMode {
@@ -17,6 +20,7 @@ pub enum DocumentMode {
         pages_id: u32,
         font_id: u32,
         custom_font_ids: Vec<u32>,  // Track custom font object IDs
+        image_ids: Vec<u32>,        // Track image object IDs (index -> object_id)
     },
 }
 
@@ -25,6 +29,7 @@ pub struct Document {
     pub mode: DocumentMode,
     pub fonts: Vec<Font>,  // Registered custom fonts
     pub fonts_embedded: bool,  // Track if fonts have been written in streaming mode
+    pub images: Vec<Image>, // Registered images (Buffered mode only)
 }
 
 impl Document {
@@ -34,6 +39,7 @@ impl Document {
             mode: DocumentMode::Buffered(Vec::new()),
             fonts: Vec::new(),
             fonts_embedded: false,
+            images: Vec::new(),
         }
     }
     
@@ -71,9 +77,11 @@ impl Document {
                 pages_id,
                 font_id,
                 custom_font_ids: Vec::new(),
+                image_ids: Vec::new(),
             },
             fonts: Vec::new(),
             fonts_embedded: false,
+            images: Vec::new(),
         })
     }
     
@@ -82,6 +90,32 @@ impl Document {
     pub fn add_font(&mut self, font: &Font) -> u32 {
         self.fonts.push(font.clone());
         (self.fonts.len() - 1) as u32
+    }
+
+    /// Register an image with the document
+    /// Returns the image index to use in page rendering
+    pub fn add_image(&mut self, image: &Image) -> io::Result<u32> {
+        match &mut self.mode {
+            DocumentMode::Buffered(_) => {
+                self.images.push(image.clone());
+                Ok((self.images.len() - 1) as u32)
+            }
+            DocumentMode::Streaming { 
+                writer, 
+                next_object_id, 
+                image_ids, 
+                .. 
+            } => {
+                // In streaming mode, write image object immediately
+                let image_id = *next_object_id;
+                embed_image(writer, image, image_id)?;
+                
+                *next_object_id += 1;
+                image_ids.push(image_id);
+                
+                Ok((image_ids.len() - 1) as u32)
+            }
+        }
     }
     
     /// Add a page to the document
@@ -99,6 +133,7 @@ impl Document {
                 pages_id,
                 font_id,
                 custom_font_ids,
+                image_ids,
                 ..  // Ignore catalog_id
             } => {
                 // Embed fonts lazily before the first page
@@ -126,7 +161,22 @@ impl Document {
                 for (i, type0_id) in custom_font_ids.iter().enumerate() {
                     font_resources.push((format!("F{}", i + 2), PdfObject::Reference(*type0_id)));
                 }
+
+                // Build XObject resources (images)
+                let mut xobject_resources = Vec::new();
+                for image_idx in &page.used_images {
+                    if let Some(obj_id) = image_ids.get(*image_idx as usize) {
+                        xobject_resources.push((format!("Im{}", image_idx), PdfObject::Reference(*obj_id)));
+                    }
+                }
                 
+                let mut resources_dict = vec![
+                    ("Font".to_string(), PdfObject::Dictionary(font_resources))
+                ];
+                if !xobject_resources.is_empty() {
+                    resources_dict.push(("XObject".to_string(), PdfObject::Dictionary(xobject_resources)));
+                }
+
                 // Write page object immediately
                 let page_id = *next_object_id;
                 *next_object_id += 1;
@@ -140,9 +190,7 @@ impl Document {
                         PdfObject::Real(page.width as f64),
                         PdfObject::Real(page.height as f64),
                     ])),
-                    ("Resources".to_string(), PdfObject::Dictionary(vec![
-                        ("Font".to_string(), PdfObject::Dictionary(font_resources))
-                    ])),
+                    ("Resources".to_string(), PdfObject::Dictionary(resources_dict)),
                     ("Contents".to_string(), PdfObject::Reference(content_id)),
                 ]);
                 writer.write_object(page_id, &page_obj)?;
@@ -150,7 +198,6 @@ impl Document {
                 // Track page ID for later
                 page_ids.push(page_id);
                 
-                // Page data is now dropped, freeing memory
                 Ok(())
             }
         }
@@ -210,6 +257,13 @@ impl Document {
                     custom_font_ids.push(next_id);
                     next_id += 4;  // FontFile, FontDescriptor, CIDFont, Type0
                 }
+
+                // Calculate object IDs for images
+                let mut image_object_ids = Vec::new();
+                for _ in 0..self.images.len() {
+                    image_object_ids.push(next_id);
+                    next_id += 1;
+                }
                 
                 // Calculate object IDs for pages
                 let mut page_object_ids = Vec::new();
@@ -264,6 +318,11 @@ impl Document {
                     let type0_id = embed_custom_font(&mut writer, font, custom_font_ids[i], used_gids)?;
                     type0_font_ids.push(type0_id);
                 }
+
+                // Embed images
+                for (i, image) in self.images.iter().enumerate() {
+                    embed_image(&mut writer, image, image_object_ids[i])?;
+                }
                 
                 // Build font resources dictionary
                 let mut font_resources = vec![
@@ -279,6 +338,21 @@ impl Document {
                     
                     let content_stream = PdfObject::Stream(vec![], page.content.clone());
                     writer.write_object(content_id, &content_stream)?;
+
+                    // Build XObject resources (images)
+                    let mut xobject_resources = Vec::new();
+                    for image_idx in &page.used_images {
+                        if let Some(obj_id) = image_object_ids.get(*image_idx as usize) {
+                            xobject_resources.push((format!("Im{}", image_idx), PdfObject::Reference(*obj_id)));
+                        }
+                    }
+
+                    let mut resources_dict = vec![
+                        ("Font".to_string(), PdfObject::Dictionary(font_resources.clone()))
+                    ];
+                    if !xobject_resources.is_empty() {
+                        resources_dict.push(("XObject".to_string(), PdfObject::Dictionary(xobject_resources)));
+                    }
                     
                     let page_obj = PdfObject::Dictionary(vec![
                         ("Type".to_string(), PdfObject::Name("Page".to_string())),
@@ -289,9 +363,7 @@ impl Document {
                             PdfObject::Real(page.width as f64),
                             PdfObject::Real(page.height as f64),
                         ])),
-                        ("Resources".to_string(), PdfObject::Dictionary(vec![
-                            ("Font".to_string(), PdfObject::Dictionary(font_resources.clone()))
-                        ])),
+                        ("Resources".to_string(), PdfObject::Dictionary(resources_dict)),
                         ("Contents".to_string(), PdfObject::Reference(content_id)),
                     ]);
                     writer.write_object(page_id, &page_obj)?;
@@ -306,17 +378,11 @@ impl Document {
 }
 
 /// Subset a font to include only used glyphs
-/// Falls back to full font if subsetting fails
 fn subset_font(font: &Font, used_gids: &HashSet<u16>) -> Vec<u8> {
     let font_data = font.get_font_data();
-    
-    // Convert glyph IDs to vec (subsetter crate works with u16)
     let mut gids: Vec<u16> = used_gids.iter().copied().collect();
-    gids.sort();  // Ensure deterministic output
-    
-    // Create a PDF subsetting profile with our glyph list
+    gids.sort();
     let profile = subsetter::Profile::pdf(&gids);
-    
     match subsetter::subset(font_data, 0, profile) {
         Ok(subset_data) => subset_data,
         Err(e) => {
@@ -327,16 +393,13 @@ fn subset_font(font: &Font, used_gids: &HashSet<u16>) -> Vec<u8> {
 }
 
 /// Embed a custom TrueType font into PDF
-/// Returns the object ID of the Type0 font (to reference in Resources)
-/// This creates: FontFile stream, FontDescriptor, CIDFont, and Type0 composite font
-/// If used_gids is provided, the font will be subset to include only those glyphs
 fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gids: Option<&HashSet<u16>>) -> io::Result<u32> {
     let font_file_id = base_id;
     let font_descriptor_id = base_id + 1;
     let cid_font_id = base_id + 2;
-    let type0_font_id = base_id + 3;  // This is what we return
+    let type0_font_id = base_id + 3;
     
-    // 1. Write TrueType font file stream (subset if glyph list provided)
+    // 1. Write TrueType font file stream
     let font_data = if let Some(gids) = used_gids {
         subset_font(font, gids)
     } else {
@@ -344,9 +407,7 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
     };
     
     let font_file = PdfObject::Stream(
-        vec![
-            ("Length1".to_string(), PdfObject::Integer(font_data.len() as i64)),
-        ],
+        vec![("Length1".to_string(), PdfObject::Integer(font_data.len() as i64))],
         font_data
     );
     writer.write_object(font_file_id, &font_file)?;
@@ -356,7 +417,7 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
     let font_descriptor = PdfObject::Dictionary(vec![
         ("Type".to_string(), PdfObject::Name("FontDescriptor".to_string())),
         ("FontName".to_string(), PdfObject::Name(font.get_name().to_string())),
-        ("Flags".to_string(), PdfObject::Integer(32)),  // Symbolic font
+        ("Flags".to_string(), PdfObject::Integer(32)),
         ("FontBBox".to_string(), PdfObject::Array(vec![
             PdfObject::Integer(bbox.0 as i64),
             PdfObject::Integer(bbox.1 as i64),
@@ -367,12 +428,12 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
         ("Ascent".to_string(), PdfObject::Integer(font.ascent() as i64)),
         ("Descent".to_string(), PdfObject::Integer(font.descent() as i64)),
         ("CapHeight".to_string(), PdfObject::Integer(font.cap_height() as i64)),
-        ("StemV".to_string(), PdfObject::Integer(80)),  // Approximate
+        ("StemV".to_string(), PdfObject::Integer(80)),
         ("FontFile2".to_string(), PdfObject::Reference(font_file_id)),
     ]);
     writer.write_object(font_descriptor_id, &font_descriptor)?;
     
-    //3. Write CIDFont (Type 2 for TrueType)
+    //3. Write CIDFont
     let cid_font = PdfObject::Dictionary(vec![
         ("Type".to_string(), PdfObject::Name("Font".to_string())),
         ("Subtype".to_string(), PdfObject::Name("CIDFontType2".to_string())),
@@ -383,11 +444,11 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
             ("Supplement".to_string(), PdfObject::Integer(0)),
         ])),
         ("FontDescriptor".to_string(), PdfObject::Reference(font_descriptor_id)),
-        ("DW".to_string(), PdfObject::Integer(1000)),  // Default width
+        ("DW".to_string(), PdfObject::Integer(1000)),
     ]);
     writer.write_object(cid_font_id, &cid_font)?;
     
-    // 4. Write Type0 composite font (this is what gets referenced in Resources)
+    // 4. Write Type0 composite font
     let type0_font = PdfObject::Dictionary(vec![
         ("Type".to_string(), PdfObject::Name("Font".to_string())),
         ("Subtype".to_string(), PdfObject::Name("Type0".to_string())),
@@ -400,4 +461,45 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
     writer.write_object(type0_font_id, &type0_font)?;
     
     Ok(type0_font_id)
+}
+
+/// Embed an image into the PDF
+fn embed_image(writer: &mut PdfWriter, image: &Image, object_id: u32) -> io::Result<()> {
+    // If filter is explicitly set (e.g. DCTDecode for JPEG), use raw data
+    // If filter is None or FlateDecode was requested (for PNG), compress data
+    
+    let (data, filter) = if let Some(f) = &image.filter {
+        if f == "FlateDecode" {
+            // Re-compress using Flate (zlib)
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&image.data)?;
+            (encoder.finish()?, Some("FlateDecode".to_string()))
+        } else {
+            // Passthrough (e.g. JPEG)
+            (image.data.clone(), Some(f.clone()))
+        }
+    } else {
+        // Default to Flate
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&image.data)?;
+        (encoder.finish()?, Some("FlateDecode".to_string()))
+    };
+
+    let mut dict = vec![
+        ("Type".to_string(), PdfObject::Name("XObject".to_string())),
+        ("Subtype".to_string(), PdfObject::Name("Image".to_string())),
+        ("Width".to_string(), PdfObject::Integer(image.width as i64)),
+        ("Height".to_string(), PdfObject::Integer(image.height as i64)),
+        ("ColorSpace".to_string(), PdfObject::Name(image.color_space.clone())),
+        ("BitsPerComponent".to_string(), PdfObject::Integer(image.bits_per_component as i64)),
+    ];
+    
+    if let Some(f) = filter {
+        dict.push(("Filter".to_string(), PdfObject::Name(f)));
+    }
+    
+    let image_obj = PdfObject::Stream(dict, data);
+    writer.write_object(object_id, &image_obj)?;
+    
+    Ok(())
 }
