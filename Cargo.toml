@@ -1,0 +1,18 @@
+[package]
+name = "ai_pdf_writer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = "2.12"
+napi-derive = "2.12"
+ttf-parser = "0.25"
+owned_ttf_parser = "0.25"
+rustybuzz = "0.20"
+subsetter = "0.1"
+
+[build-dependencies]
+napi-build = "2.0"
