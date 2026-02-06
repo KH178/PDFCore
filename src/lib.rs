@@ -9,7 +9,7 @@ use crate::core::page::Page as CorePage;
 use crate::core::document::Document as CoreDocument;
 use crate::core::image::Image as CoreImage;
 use crate::core::table::{Table as CoreTable, TableColumn as CoreTableColumn, TextAlign as CoreTextAlign};
-use crate::core::layout::{LayoutNode as CoreLayoutNode, Column as CoreColumn, Row as CoreRow, TextNode as CoreTextNode, Container as CoreContainer, ImageNode as CoreImageNode, Rect as CoreRect, Constraints as CoreConstraints, SplitAction};
+use crate::core::layout::{LayoutNode as CoreLayoutNode, Column as CoreColumn, Row as CoreRow, TextNode as CoreTextNode, Container as CoreContainer, ImageNode as CoreImageNode, Rect as CoreRect, Constraints as CoreConstraints, SplitAction, PageContext as CorePageContext};
 
 // Helper to map IO errors to N-API errors
 fn map_io_err(e: io::Error) -> Error {
@@ -87,6 +87,14 @@ pub struct ShapedGlyph {
 }
 
 /// Column definition for Table
+/// Template for repeating headers and footers
+#[napi(object)]
+#[derive(Clone)]
+pub struct Template {
+    pub margin_top: Option<f64>,
+    pub margin_bottom: Option<f64>,
+}
+
 #[napi(object)]
 pub struct TableColumn {
     pub header: String,
@@ -207,6 +215,17 @@ impl LayoutNode {
             }),
         }
     }
+
+    #[napi(factory)]
+    pub fn page_number(format: String, size: f64, align: Option<String>) -> Self {
+        LayoutNode {
+            inner: Arc::new(crate::core::layout::PageNumberNode {
+                format,
+                size,
+                align: align.unwrap_or_else(|| "left".to_string()),
+            }),
+        }
+    }
 }
 
 // ... ShapedGlyph ... 
@@ -306,7 +325,7 @@ impl Page {
             height: size.height,
         };
         
-        node.inner.render(&mut self.inner, area, &font.inner, font_index);
+        node.inner.render(&mut self.inner, area, &font.inner, font_index, &CorePageContext::default());
         
     }
 }
@@ -389,35 +408,76 @@ impl Document {
 
     /// Automatically paginate a layout tree across multiple pages
     #[napi]
-    pub fn render_flow(&mut self, node: &LayoutNode, width: f64, height: f64, font: &Font, font_index: u32) -> Result<()> {
+    pub fn render_flow(
+        &mut self, 
+        node: &LayoutNode, 
+        width: f64, 
+        height: f64, 
+        font: &Font, 
+        font_index: u32,
+        header: Option<&LayoutNode>,
+        footer: Option<&LayoutNode>,
+        template: Option<Template>
+    ) -> Result<()> {
         let mut current_node = Some(node.inner.clone());
         
+        let header_node = header.map(|h| h.inner.clone());
+        let footer_node = footer.map(|f| f.inner.clone());
+        let margin_top = template.as_ref().and_then(|t| t.margin_top).unwrap_or(0.0);
+        let margin_bottom = template.as_ref().and_then(|t| t.margin_bottom).unwrap_or(0.0);
+
+        // Pre-calculate fixed reserved space
+        let constraints = CoreConstraints::loose(width, f64::INFINITY);
+        let header_height = if let Some(h) = &header_node {
+             h.measure(constraints, &font.inner).height
+        } else { 0.0 };
+
+        let footer_height = if let Some(f) = &footer_node {
+             f.measure(constraints, &font.inner).height
+        } else { 0.0 };
+        
+        let top_reserved = margin_top + header_height;
+        let bottom_reserved = margin_bottom + footer_height;
+        let body_available_height = height - top_reserved - bottom_reserved;
+        let body_start_y = height - top_reserved;
+        
+        // Side margins for content (50pt left/right)
+        let side_margin = 50.0;
+        let content_width = width - (side_margin * 2.0);
+
         // Loop until entire node is consumed
         while let Some(node) = current_node {
              let mut page = Page::new(width, height);
-             // For flow, we use the entire page height (minus margins if we added them, assuming 0 for now)
-             let available_height = height; 
              
-             match node.split(width, available_height, &font.inner) {
+             // 1. Render Header
+             if let Some(h) = &header_node {
+                 let header_area = CoreRect { x: side_margin, y: height - margin_top, width: content_width, height: header_height };
+                 h.render(&mut page.inner, header_area, &font.inner, font_index, &CorePageContext::default());
+             }
+
+             // 2. Render Footer at very bottom (margin_bottom from page bottom)
+             if let Some(f) = &footer_node {
+                 let footer_y = margin_bottom; // Y position from bottom of page
+                 let footer_area = CoreRect { x: side_margin, y: footer_y, width: content_width, height: footer_height };
+                 f.render(&mut page.inner, footer_area, &font.inner, font_index, &CorePageContext::default());
+             }
+             
+             // 3. Render Body with side margins
+             match node.split(content_width, body_available_height, &font.inner) {
                  SplitAction::Fit => {
-                      // Fits entirely on new page
-                      page.render_layout(&LayoutNode { inner: node }, 0.0, height, width, font, font_index);
+                      page.render_layout(&LayoutNode { inner: node }, side_margin, body_start_y, content_width, font, font_index);
                       self.add_page(&page)?;
                       current_node = None;
                  },
                  SplitAction::Push => {
-                      // Doesn't fit, but cannot split further (or atomic).
-                      // We must render it on this new page (clipped or overflowed).
-                      page.render_layout(&LayoutNode { inner: node }, 0.0, height, width, font, font_index);
+                      page.render_layout(&LayoutNode { inner: node }, side_margin, body_start_y, content_width, font, font_index);
                       self.add_page(&page)?;
                       current_node = None;
                  },
                  SplitAction::Split(head, tail) => {
-                      // Split! Render head on this page.
-                      page.render_layout(&LayoutNode { inner: head }, 0.0, height, width, font, font_index);
+                      page.render_layout(&LayoutNode { inner: head }, side_margin, body_start_y, content_width, font, font_index);
                       self.add_page(&page)?;
                       
-                      // Continue with tail
                       current_node = Some(tail);
                  }
              }

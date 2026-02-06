@@ -4,6 +4,18 @@ use crate::core::text;
 use crate::core::table::Table;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy)]
+pub struct PageContext {
+    pub current: usize,
+    pub total: usize,
+}
+
+impl Default for PageContext {
+    fn default() -> Self {
+        PageContext { current: 1, total: 1 }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Size {
     pub width: f64,
@@ -67,7 +79,7 @@ pub trait LayoutNode {
     fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction;
 
     /// Draw the node onto the page within the given area.
-    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32);
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext);
 }
 
 // --- Components ---
@@ -96,7 +108,7 @@ impl LayoutNode for Column {
         Size { width: width.max(constraints.min_width), height }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
         let mut y = area.y;
         
         for child in &self.children {
@@ -107,7 +119,7 @@ impl LayoutNode for Column {
                 width: area.width, 
                 height: size.height,
             };
-            child.render(page, child_area, font, font_index);
+            child.render(page, child_area, font, font_index, context);
             y -= size.height + self.spacing; 
         }
     }
@@ -223,7 +235,7 @@ impl LayoutNode for Row {
         Size { width, height }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
         let mut x = area.x;
         
         for child in &self.children {
@@ -234,7 +246,7 @@ impl LayoutNode for Row {
                 width: size.width, 
                 height: area.height, 
             };
-            child.render(page, child_area, font, font_index);
+            child.render(page, child_area, font, font_index, context);
             x += size.width + self.spacing;
         }
     }
@@ -272,7 +284,7 @@ impl LayoutNode for TextNode {
         Size { width, height: lines as f64 * leading }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
         page.text_multiline(self.text.clone(), area.x, area.y, area.width, self.size, font_index, font);
     }
 
@@ -326,7 +338,7 @@ impl LayoutNode for Container {
         }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
         // Draw border if width > 0
         if self.border_width > 0.0 {
             // PDF rect is bottom-up. area.y is TOP.
@@ -343,7 +355,7 @@ impl LayoutNode for Container {
             height: area.height - (reduction * 2.0),
         };
         
-        self.child.render(page, child_area, font, font_index);
+        self.child.render(page, child_area, font, font_index, context);
     }
 
     fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction {
@@ -384,7 +396,7 @@ impl LayoutNode for ImageNode {
         }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, _: &Font, _font_index: u32) {
+    fn render(&self, page: &mut Page, area: Rect, _: &Font, _font_index: u32, _context: &PageContext) {
         // Draw image fitting in the area. 
         // area.y is top. draw_image usually takes bottom-left?
         // Wait, page.draw_image(index, x, y, w, h). 
@@ -447,7 +459,7 @@ impl LayoutNode for TableNode {
         Size { width, height }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, _context: &PageContext) {
         page.draw_table(&self.table, area.x, area.y, font, font_index);
     }
 
@@ -512,6 +524,57 @@ impl LayoutNode for TableNode {
          } else {
              SplitAction::Fit
          }
+    }
+}
+
+// PageNumberNode: Renders text with {page} and {total} placeholders
+#[derive(Debug, Clone)]
+pub struct PageNumberNode {
+    pub format: String,
+    pub size: f64,
+    pub align: String, // "left", "center", "right"
+}
+
+impl LayoutNode for PageNumberNode {
+    fn measure(&self, constraints: Constraints, font: &Font) -> Size {
+        // For measurement, replace placeholders with maximum expected values
+        let sample_text = self.format.replace("{page}", "999").replace("{total}", "999");
+        let lines = text::calculate_text_lines(&sample_text, constraints.max_width, self.size, font);
+        let leading = self.size * 1.2;
+        Size { width: constraints.max_width, height: lines as f64 * leading }
+    }
+
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
+        // Replace placeholders with actual values from context
+        let resolved_text = self.format
+            .replace("{page}", &context.current.to_string())
+            .replace("{total}", &context.total.to_string());
+        
+        let mut x = area.x;
+        
+        // Calculate position based on alignment
+        if self.align == "right" {
+            let text_width = font.measure_text(&resolved_text, self.size);
+            x = area.x + area.width - text_width;
+        } else if self.align == "center" {
+            let text_width = font.measure_text(&resolved_text, self.size);
+            x = area.x + (area.width - text_width) / 2.0;
+        }
+        
+        page.text_multiline(resolved_text, x, area.y, area.width, self.size, font_index, font);
+    }
+
+    fn split(&self, _available_width: f64, available_height: f64, font: &Font) -> SplitAction {
+        // Calculate height
+        let lines = text::calculate_text_lines(&self.format, _available_width, self.size, font);
+        let leading = self.size * 1.2;
+        let height = lines as f64 * leading;
+        
+        if height <= available_height {
+            SplitAction::Fit
+        } else {
+            SplitAction::Push
+        }
     }
 }
 

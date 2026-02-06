@@ -11,7 +11,14 @@ export interface ShapedGlyph {
   xOffset: number
   yOffset: number
 }
-/** Column definition for Table */
+/**
+ * Column definition for Table
+ * Template for repeating headers and footers
+ */
+export interface Template {
+  marginTop?: number
+  marginBottom?: number
+}
 export interface TableColumn {
   header: string
   width: number
@@ -48,6 +55,7 @@ export declare class LayoutNode {
   static container(child: LayoutNode, padding?: number | undefined | null, border?: number | undefined | null): LayoutNode
   static image(imageIndex: number, width: number, height: number): LayoutNode
   static table(table: Table): LayoutNode
+  static pageNumber(format: string, size: number, align?: string | undefined | null): LayoutNode
 }
 /** Represents a single page in a PDF document */
 export declare class Page {
@@ -98,5 +106,5 @@ export declare class Document {
   /** Write the document to a file (buffered mode) */
   writeTo(path: string): void
   /** Automatically paginate a layout tree across multiple pages */
-  renderFlow(node: LayoutNode, width: number, height: number, font: Font, fontIndex: number): void
+  renderFlow(node: LayoutNode, width: number, height: number, font: Font, fontIndex: number, header?: LayoutNode | undefined | null, footer?: LayoutNode | undefined | null, template?: Template | undefined | null): void
 }
