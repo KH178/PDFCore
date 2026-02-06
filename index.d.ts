@@ -47,6 +47,7 @@ export declare class LayoutNode {
   static text(text: string, size: number): LayoutNode
   static container(child: LayoutNode, padding?: number | undefined | null, border?: number | undefined | null): LayoutNode
   static image(imageIndex: number, width: number, height: number): LayoutNode
+  static table(table: Table): LayoutNode
 }
 /** Represents a single page in a PDF document */
 export declare class Page {
@@ -66,8 +67,10 @@ export declare class Page {
   drawFillRect(x: number, y: number, w: number, h: number, gray: number): this
   /** Draw a table */
   drawTable(table: Table, x: number, y: number, font: Font, fontIndex: number): number
+  /** Draw an image */
+  drawImage(imageIndex: number, x: number, y: number, width: number, height: number): this
   /** Render a declarative layout tree */
-  renderLayout(node: LayoutNode, x: number, y: number, width: number, font: Font): void
+  renderLayout(node: LayoutNode, x: number, y: number, width: number, font: Font, fontIndex: number): void
 }
 /** Represents a PDF document with multiple pages */
 export declare class Document {
@@ -94,4 +97,6 @@ export declare class Document {
   finalize(): void
   /** Write the document to a file (buffered mode) */
   writeTo(path: string): void
+  /** Automatically paginate a layout tree across multiple pages */
+  renderFlow(node: LayoutNode, width: number, height: number, font: Font, fontIndex: number): void
 }

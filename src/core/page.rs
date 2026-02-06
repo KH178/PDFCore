@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::font::Font;
 use crate::core::writer::escape_string;
 use crate::core::table::{Table, TextAlign};
+use crate::core::text;
 
 /// Represents a single page in a PDF document
 #[derive(Debug, Clone)]
@@ -64,89 +65,19 @@ impl Page {
     }
 
     
-    /// Calculate how many lines are needed for text with wrapping
-    fn calculate_text_lines(text: &str, width: f64, size: f64, font: &Font) -> usize {
-        if text.is_empty() {
-            return 1;
-        }
-        
-        let words: Vec<&str> = text.split_whitespace().collect();
-        let mut buffer = Vec::new();
-        let mut line_count = 0;
-        
-        for word in words {
-            // Check if word alone is wider than available width
-            let word_width = font.measure_text(word, size);
-            
-            if word_width > width {
-                // Word needs character-level breaking
-                // First, count the current buffer as a line if not empty
-                if !buffer.is_empty() {
-                    line_count += 1;
-                    buffer.clear();
-                }
-                
-                // Count lines needed for this word broken at character level
-                let chars: Vec<char> = word.chars().collect();
-                let mut char_buffer = String::new();
-                
-                for ch in chars {
-                    let test_str = format!("{}{}", char_buffer, ch);
-                    let test_width = font.measure_text(&test_str, size);
-                    
-                    if test_width <= width {
-                        char_buffer.push(ch);
-                    } else {
-                        if !char_buffer.is_empty() {
-                            line_count += 1;
-                        }
-                        char_buffer.clear();
-                        char_buffer.push(ch);
-                    }
-                }
-                
-                // Count the last character buffer line
-                if !char_buffer.is_empty() {
-                    line_count += 1;
-                }
-            } else {
-                // Try adding this word to the buffer
-                let mut test_line = buffer.clone();
-                test_line.push(word);
-                let test_text = test_line.join(" ");
-                let test_width = font.measure_text(&test_text, size);
-                
-                if test_width <= width {
-                    // Word fits, add it to buffer
-                    buffer.push(word);
-                } else {
-                    // Word doesn't fit
-                    if !buffer.is_empty() {
-                        // Complete the current line
-                        line_count += 1;
-                        buffer.clear();
-                    }
-                    // Start new line with this word
-                    buffer.push(word);
-                }
-            }
-        }
-        
-        // Count the last line
-        if !buffer.is_empty() {
-            line_count += 1;
-        }
-        
-        line_count.max(1) // At least 1 line
-    }
+    // calculate_text_lines moved to crate::core::text::calculate_text_lines
     
     /// Add multiline text with wrapping
     pub fn text_multiline(&mut self, text: String, x: f64, y: f64, width: f64, size: f64, font_index: u32, font: &Font) -> &mut Self {
+        let leading = size * 1.2;
+        // Basic split by words
+        // We need to implement wrapping based on width
         let words: Vec<&str> = text.split_whitespace().collect();
-        let leading = size * 1.2; // Default line height
-        
-        let mut current_y = y;
         let mut buffer = Vec::new();
+        // Start rendering BELOW the top Y coordinate (assuming y is Top-Left of text box)
+        // PDF coordinates: y is baseline. We want text to be INSIDE the box starting at y (Top).
+        // So first baseline is at y - size (approx ascent).
+        let mut current_y = y - size; 
         
         for word in words {
             // Check if word alone is wider than available width
@@ -309,7 +240,7 @@ impl Page {
             for (i, cell_text) in row.iter().enumerate() {
                 let col_width = if i < table.columns.len() { table.columns[i].width } else { 100.0 };
                 let available_width = col_width - (2.0 * s.padding);
-                let lines = Page::calculate_text_lines(cell_text, available_width, font_size, font);
+                let lines = text::calculate_text_lines(cell_text, available_width, font_size, font);
                 max_lines = max_lines.max(lines);
             }
             

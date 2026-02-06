@@ -9,7 +9,7 @@ use crate::core::page::Page as CorePage;
 use crate::core::document::Document as CoreDocument;
 use crate::core::image::Image as CoreImage;
 use crate::core::table::{Table as CoreTable, TableColumn as CoreTableColumn, TextAlign as CoreTextAlign};
-use crate::core::layout::{LayoutNode as CoreLayoutNode, Column as CoreColumn, Row as CoreRow, TextNode as CoreTextNode, Container as CoreContainer, ImageNode as CoreImageNode, Rect as CoreRect, Constraints as CoreConstraints};
+use crate::core::layout::{LayoutNode as CoreLayoutNode, Column as CoreColumn, Row as CoreRow, TextNode as CoreTextNode, Container as CoreContainer, ImageNode as CoreImageNode, Rect as CoreRect, Constraints as CoreConstraints, SplitAction};
 
 // Helper to map IO errors to N-API errors
 fn map_io_err(e: io::Error) -> Error {
@@ -198,6 +198,15 @@ impl LayoutNode {
             })
         }
     }
+
+    #[napi(factory)]
+    pub fn table(table: &Table) -> Self {
+        LayoutNode {
+            inner: Arc::new(crate::core::layout::TableNode {
+                table: table.inner.clone(),
+            }),
+        }
+    }
 }
 
 // ... ShapedGlyph ... 
@@ -267,9 +276,17 @@ impl Page {
         self.inner.draw_table(&table.inner, x, y, &font.inner, font_index)
     }
 
+    /// Draw an image
+    #[napi]
+    pub fn draw_image(&mut self, image_index: u32, x: f64, y: f64, width: f64, height: f64) -> &Self {
+        // Core Page::draw_image takes image_index, x, y, width, height
+        self.inner.draw_image(image_index, x, y, width, height);
+        self
+    }
+
     /// Render a declarative layout tree
     #[napi]
-    pub fn render_layout(&mut self, node: &LayoutNode, x: f64, y: f64, width: f64, font: &Font) {
+    pub fn render_layout(&mut self, node: &LayoutNode, x: f64, y: f64, width: f64, font: &Font, font_index: u32) {
         // Create constraints based on width (and infinite height for now?)
         // y in PDF is bottom-up, but layout engine might assume top-down relative to cached pos.
         // Our layout engine `render` takes a Rect.
@@ -288,6 +305,8 @@ impl Page {
             width: size.width,
             height: size.height,
         };
+        
+        node.inner.render(&mut self.inner, area, &font.inner, font_index);
         
     }
 }
@@ -366,6 +385,44 @@ impl Document {
         } else {
             Err(Error::new(Status::GenericFailure, "Document is finalized".to_string()))
         }
+    }
+
+    /// Automatically paginate a layout tree across multiple pages
+    #[napi]
+    pub fn render_flow(&mut self, node: &LayoutNode, width: f64, height: f64, font: &Font, font_index: u32) -> Result<()> {
+        let mut current_node = Some(node.inner.clone());
+        
+        // Loop until entire node is consumed
+        while let Some(node) = current_node {
+             let mut page = Page::new(width, height);
+             // For flow, we use the entire page height (minus margins if we added them, assuming 0 for now)
+             let available_height = height; 
+             
+             match node.split(width, available_height, &font.inner) {
+                 SplitAction::Fit => {
+                      // Fits entirely on new page
+                      page.render_layout(&LayoutNode { inner: node }, 0.0, height, width, font, font_index);
+                      self.add_page(&page)?;
+                      current_node = None;
+                 },
+                 SplitAction::Push => {
+                      // Doesn't fit, but cannot split further (or atomic).
+                      // We must render it on this new page (clipped or overflowed).
+                      page.render_layout(&LayoutNode { inner: node }, 0.0, height, width, font, font_index);
+                      self.add_page(&page)?;
+                      current_node = None;
+                 },
+                 SplitAction::Split(head, tail) => {
+                      // Split! Render head on this page.
+                      page.render_layout(&LayoutNode { inner: head }, 0.0, height, width, font, font_index);
+                      self.add_page(&page)?;
+                      
+                      // Continue with tail
+                      current_node = Some(tail);
+                 }
+             }
+        }
+        Ok(())
     }
 }
 

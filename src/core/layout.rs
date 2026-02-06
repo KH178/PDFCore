@@ -1,5 +1,7 @@
 use crate::core::page::Page;
 use crate::core::font::Font;
+use crate::core::text;
+use crate::core::table::Table;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,22 +37,37 @@ impl Constraints {
     }
 }
 
+// Return type for split operation
+pub enum SplitResult {
+    None, // Used up all content, nothing left
+    Split(Arc<dyn LayoutNode>, Option<Arc<dyn LayoutNode>>), // (Head, Tail). Tail is Option because sometimes we split but consume all? No.
+    // If we split, we MUST have a Tail, unless implied?
+    // Let's match plan: Split(Head, Tail)
+    // Actually, plan said Split(Head, Tail).
+    // Let's use: Split(Arc<dyn LayoutNode>, Arc<dyn LayoutNode>)
+    // Wait, if Text splits into "Hello" and "World", we have two nodes.
+    // If Text fits "Hello World", we return None (it fit).
+    // If Text doesn't fit at all, we return Push?
+    // Plan: NoteNone, Split(Head, Tail), Push.
+}
+
+// #[derive(Debug)]
+pub enum SplitAction {
+    Fit, // Fits completely
+    Split(Arc<dyn LayoutNode>, Arc<dyn LayoutNode>), // (Head, Tail)
+    Push, // Does not fit at all (or too small to split meaningfully)
+}
+
 /// A node in the layout tree that can size, position, and render itself.
 pub trait LayoutNode {
     /// Calculate the size this node wants to be, given the constraints.
     fn measure(&self, constraints: Constraints, font: &Font) -> Size;
     
-    /// Assign a specific area to the node. 
-    /// This is where cached positions would be stored if we had state.
-    /// For this stateless pass, we might just use the result in render, 
-    /// but usually layout engines store the computed rect.
-    /// For simplicity in v3.0, render will take the Rect.
-    fn layout(&mut self, area: Rect) {
-        // Default impl (noop)
-    }
+    /// Attempt to split this node to fit in available height (and width for wrapping context)
+    fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction;
 
     /// Draw the node onto the page within the given area.
-    fn render(&self, page: &mut Page, area: Rect, font: &Font);
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32);
 }
 
 // --- Components ---
@@ -79,7 +96,7 @@ impl LayoutNode for Column {
         Size { width: width.max(constraints.min_width), height }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
         let mut y = area.y;
         
         for child in &self.children {
@@ -90,8 +107,95 @@ impl LayoutNode for Column {
                 width: area.width, 
                 height: size.height,
             };
-            child.render(page, child_area, font);
+            child.render(page, child_area, font, font_index);
             y -= size.height + self.spacing; 
+        }
+    }
+
+    fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction {
+        let mut used_height = 0.0;
+        let mut split_index = None;
+        let mut split_node_parts = None; // (Head, Tail) if a node splits
+
+        for (i, child) in self.children.iter().enumerate() {
+            // Measure child
+            // Note: Column passes its full width as constraint generally.
+            // But here we use available_width passed from parent.
+            let constraints = Constraints::loose(available_width, f64::INFINITY);
+            let size = child.measure(constraints, font);
+            
+            // Check if adding this child (plus spacing) exceeds available
+            let spacing = if i > 0 { self.spacing } else { 0.0 };
+            
+            // Use a small safety margin to prevent items from sticking to the very bottom edge and potentially being clipped by PDF viewers or rounding errors.
+            let safety_margin = 5.0;
+
+            if used_height + spacing + size.height > available_height - safety_margin {
+                // Overflow!
+                // Can we split this child?
+                let remaining_height = available_height - (used_height + spacing);
+                
+                // If remaining_height is tiny (e.g. < 0), we must push
+                if remaining_height <= 0.0 {
+                    split_index = Some(i);
+                    // Child i is pushed entirely
+                    break;
+                }
+
+                match child.split(available_width, remaining_height, font) {
+                    SplitAction::Fit => {
+                         used_height += spacing + size.height;
+                    },
+                    SplitAction::Push => {
+                        // Child cannot fit in remaining.
+                        split_index = Some(i);
+                        break;
+                    },
+                    SplitAction::Split(head, tail) => {
+                        // Child split. 
+                        // Head goes to this column. Tail goes to next column.
+                        split_index = Some(i);
+                        split_node_parts = Some((head, tail));
+                        break;
+                    }
+                }
+            } else {
+                used_height += spacing + size.height;
+            }
+        }
+
+        if let Some(idx) = split_index {
+            // Create Head Column (children 0..idx, plus potential head part)
+            let mut head_children = self.children[0..idx].to_vec();
+            
+            // Create Tail Column (potential tail part, plus children idx+1..end)
+            let mut tail_children = Vec::new();
+            
+            if let Some((head_part, tail_part)) = split_node_parts {
+                head_children.push(head_part);
+                tail_children.push(tail_part);
+                // Add remaining existing children
+                if idx + 1 < self.children.len() {
+                    tail_children.extend_from_slice(&self.children[idx+1..]);
+                }
+            } else {
+                // No split parts, meaning child[idx] was Pushed entirely to tail
+                tail_children.extend_from_slice(&self.children[idx..]);
+            }
+            
+            // Return split
+            // If head_children empty, we pushed everything? Then we return Push.
+            if head_children.is_empty() {
+                return SplitAction::Push;
+            }
+            
+            let head_col: Arc<dyn LayoutNode> = Arc::new(Column { children: head_children, spacing: self.spacing });
+            let tail_col: Arc<dyn LayoutNode> = Arc::new(Column { children: tail_children, spacing: self.spacing });
+            
+            SplitAction::Split(head_col, tail_col)
+        } else {
+            // Loop finished, everything fits
+            SplitAction::Fit
         }
     }
 }
@@ -119,7 +223,7 @@ impl LayoutNode for Row {
         Size { width, height }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
         let mut x = area.x;
         
         for child in &self.children {
@@ -130,8 +234,17 @@ impl LayoutNode for Row {
                 width: size.width, 
                 height: area.height, 
             };
-            child.render(page, child_area, font);
+            child.render(page, child_area, font, font_index);
             x += size.width + self.spacing;
+        }
+    }
+
+    fn split(&self, _available_width: f64, available_height: f64, font: &Font) -> SplitAction {
+        let size = self.measure(Constraints::loose(f64::INFINITY, f64::INFINITY), font);
+        if size.height <= available_height {
+            SplitAction::Fit
+        } else {
+            SplitAction::Push
         }
     }
 }
@@ -143,35 +256,47 @@ pub struct TextNode {
 
 impl LayoutNode for TextNode {
     fn measure(&self, constraints: Constraints, font: &Font) -> Size {
-        let width = constraints.max_width;
-        // Calculate expected height based on wrapping
-        // This duplicates logic in text_multiline a bit, but necessary.
-        // For v3.0 MVP, let's use a helper or estimate.
-        // Actually, let's just make text_multiline return the height used?
-        // Or duplicate the split logic.
+        // Compute raw width of text (unwrapped)
+        let raw_width = font.measure_text(&self.text, self.size);
         
-        let words: Vec<&str> = self.text.split_whitespace().collect();
-        let space_width = font.measure_text(" ", self.size);
+        // Determine actual width to use
+        let width = if constraints.max_width.is_finite() {
+            raw_width.min(constraints.max_width)
+        } else {
+            raw_width
+        };
+        
+        let lines = text::calculate_text_lines(&self.text, width, self.size, font);
         let leading = self.size * 1.2;
-        
-        let mut current_width = 0.0;
-        let mut lines = 1;
-        
-        for word in words {
-            let word_width = font.measure_text(word, self.size);
-            if current_width + word_width > width {
-                lines += 1;
-                current_width = word_width + space_width;
-            } else {
-                current_width += word_width + space_width;
-            }
-        }
         
         Size { width, height: lines as f64 * leading }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font) {
-        page.text_multiline(self.text.clone(), area.x, area.y, area.width, self.size, 0, font);
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
+        page.text_multiline(self.text.clone(), area.x, area.y, area.width, self.size, font_index, font);
+    }
+
+    fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction {
+        let leading = self.size * 1.2;
+        let max_lines = (available_height / leading).floor() as usize;
+        
+        // If we can't fit even one line, Push
+        if max_lines == 0 {
+            return SplitAction::Push;
+        }
+
+        // Use helper to split
+        // text::split_text_at_lines will measure and return (Head, Tail)
+        let (head, tail_opt) = text::split_text_at_lines(&self.text, available_width, self.size, font, max_lines);
+        
+        if let Some(tail) = tail_opt {
+            let head_node: Arc<dyn LayoutNode> = Arc::new(TextNode { text: head, size: self.size });
+            let tail_node: Arc<dyn LayoutNode> = Arc::new(TextNode { text: tail, size: self.size });
+            SplitAction::Split(head_node, tail_node)
+        } else {
+            // Fits completely
+            SplitAction::Fit
+        }
     }
 }
 
@@ -201,10 +326,13 @@ impl LayoutNode for Container {
         }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font) {
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
         // Draw border if width > 0
         if self.border_width > 0.0 {
-            page.draw_rect(area.x, area.y, area.width, area.height, self.border_width);
+            // PDF rect is bottom-up. area.y is TOP.
+            // We must draw from bottom-left: y - height
+            let bottom_y = area.y - area.height;
+            page.draw_rect(area.x, bottom_y, area.width, area.height, self.border_width);
         }
         
         let reduction = self.padding + self.border_width;
@@ -215,7 +343,28 @@ impl LayoutNode for Container {
             height: area.height - (reduction * 2.0),
         };
         
-        self.child.render(page, child_area, font);
+        self.child.render(page, child_area, font, font_index);
+    }
+
+    fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction {
+        let reduction = (self.padding + self.border_width) * 2.0;
+        let child_avail_h = available_height - reduction;
+        let child_avail_w = available_width - reduction;
+
+        if child_avail_h <= 0.0 {
+             return SplitAction::Push; 
+        }
+
+        match self.child.split(child_avail_w, child_avail_h, font) {
+            SplitAction::Fit => SplitAction::Fit,
+            SplitAction::Push => SplitAction::Push,
+            SplitAction::Split(head, tail) => {
+                // Wrap head and tail in new Containers with same padding/border
+                let head_container: Arc<dyn LayoutNode> = Arc::new(Container { child: head, padding: self.padding, border_width: self.border_width });
+                let tail_container: Arc<dyn LayoutNode> = Arc::new(Container { child: tail, padding: self.padding, border_width: self.border_width });
+                SplitAction::Split(head_container, tail_container)
+            }
+        }
     }
 }
 
@@ -235,7 +384,7 @@ impl LayoutNode for ImageNode {
         }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, _: &Font) {
+    fn render(&self, page: &mut Page, area: Rect, _: &Font, _font_index: u32) {
         // Draw image fitting in the area. 
         // area.y is top. draw_image usually takes bottom-left?
         // Wait, page.draw_image(index, x, y, w, h). 
@@ -255,6 +404,114 @@ impl LayoutNode for ImageNode {
         // So:
         let bottom_y = area.y - area.height;
         page.draw_image(self.image_index, area.x, bottom_y, area.width, area.height);
+    }
+
+    fn split(&self, _available_width: f64, available_height: f64, _: &Font) -> SplitAction {
+        if self.height <= available_height {
+            SplitAction::Fit
+        } else {
+            SplitAction::Push
+        }
+    }
+}
+
+// TableNode implementation
+#[derive(Debug, Clone)]
+pub struct TableNode {
+    pub table: Table,
+}
+
+impl LayoutNode for TableNode {
+    fn measure(&self, _constraints: Constraints, font: &Font) -> Size {
+        // Table width is determined by columns (fixed)
+        let width: f64 = self.table.columns.iter().map(|c| c.width).sum();
+        
+        let s = &self.table.settings;
+        let mut height = s.header_height;
+        let font_size = s.font_size;
+        let leading = font_size * 1.2;
+
+        for row in &self.table.rows {
+             let mut max_lines = 1;
+             for (i, cell_text) in row.iter().enumerate() {
+                let col_width = if i < self.table.columns.len() { self.table.columns[i].width } else { 100.0 };
+                let available_width = col_width - (2.0 * s.padding);
+                let lines = text::calculate_text_lines(cell_text, available_width, font_size, font);
+                max_lines = max_lines.max(lines);
+             }
+             let content_height = max_lines as f64 * leading;
+             let row_height = content_height + (2.0 * s.padding) + 8.0;
+             height += row_height;
+        }
+
+        Size { width, height }
+    }
+
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32) {
+        page.draw_table(&self.table, area.x, area.y, font, font_index);
+    }
+
+    fn split(&self, _available_width: f64, available_height: f64, font: &Font) -> SplitAction {
+         let s = &self.table.settings;
+         let header_height = s.header_height;
+         
+         // If we allow table to split, head requires header_height.
+         // Remaining for data = available_height - header_height.
+         let data_available = available_height - header_height;
+         
+         if data_available <= 0.0 {
+             return SplitAction::Push; 
+         }
+
+         let font_size = s.font_size;
+         let leading = font_size * 1.2;
+         
+         let mut current_height = 0.0;
+         let mut split_index = None;
+         
+         for (i, row) in self.table.rows.iter().enumerate() {
+             // Calculate row height
+             let mut max_lines = 1;
+             for (j, cell_text) in row.iter().enumerate() {
+                let col_width = if j < self.table.columns.len() { self.table.columns[j].width } else { 100.0 };
+                let available_width = col_width - (2.0 * s.padding);
+                let lines = text::calculate_text_lines(cell_text, available_width, font_size, font);
+                max_lines = max_lines.max(lines);
+             }
+             let content_height = max_lines as f64 * leading;
+             let row_height = content_height + (2.0 * s.padding) + 8.0;
+             
+             if current_height + row_height > data_available {
+                 // Split here. This row (i) does not fit.
+                 // So Head is 0..i. Tail is i..end.
+                 // If i == 0, then NO rows fit. We must PUSH.
+                 if i == 0 {
+                     return SplitAction::Push;
+                 }
+                 split_index = Some(i);
+                 break;
+             }
+             current_height += row_height;
+         }
+         
+         if let Some(idx) = split_index {
+             // Split
+             let head_rows = self.table.rows[0..idx].to_vec();
+             let tail_rows = self.table.rows[idx..].to_vec();
+             
+             let mut head_table = self.table.clone();
+             head_table.rows = head_rows;
+             
+             let mut tail_table = self.table.clone();
+             tail_table.rows = tail_rows;
+             
+             let head_node = Arc::new(TableNode { table: head_table });
+             let tail_node = Arc::new(TableNode { table: tail_table });
+             
+             SplitAction::Split(head_node, tail_node)
+         } else {
+             SplitAction::Fit
+         }
     }
 }
 
