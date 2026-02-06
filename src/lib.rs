@@ -419,8 +419,6 @@ impl Document {
         footer: Option<&LayoutNode>,
         template: Option<Template>
     ) -> Result<()> {
-        let mut current_node = Some(node.inner.clone());
-        
         let header_node = header.map(|h| h.inner.clone());
         let footer_node = footer.map(|f| f.inner.clone());
         let margin_top = template.as_ref().and_then(|t| t.margin_top).unwrap_or(0.0);
@@ -445,21 +443,47 @@ impl Document {
         let side_margin = 50.0;
         let content_width = width - (side_margin * 2.0);
 
-        // Loop until entire node is consumed
+        // === PASS 1: Dry Run - Count Total Pages ===
+        let mut page_count = 0;
+        let mut current_node = Some(node.inner.clone());
+        
+        while current_node.is_some() {
+            page_count += 1;
+            let node = current_node.unwrap();
+            
+            match node.split(content_width, body_available_height, &font.inner) {
+                SplitAction::Fit | SplitAction::Push => {
+                    current_node = None;
+                },
+                SplitAction::Split(_, tail) => {
+                    current_node = Some(tail);
+                }
+            }
+        }
+
+        // === PASS 2: Real Render with Accurate Context ===
+        let mut current_page = 1;
+        let mut current_node = Some(node.inner.clone());
+
         while let Some(node) = current_node {
              let mut page = Page::new(width, height);
              
-             // 1. Render Header
+             let context = CorePageContext {
+                 current: current_page,
+                 total: page_count,
+             };
+             
+             // 1. Render Header with context
              if let Some(h) = &header_node {
                  let header_area = CoreRect { x: side_margin, y: height - margin_top, width: content_width, height: header_height };
-                 h.render(&mut page.inner, header_area, &font.inner, font_index, &CorePageContext::default());
+                 h.render(&mut page.inner, header_area, &font.inner, font_index, &context);
              }
 
-             // 2. Render Footer at very bottom (margin_bottom from page bottom)
+             // 2. Render Footer at very bottom with context
              if let Some(f) = &footer_node {
-                 let footer_y = margin_bottom; // Y position from bottom of page
+                 let footer_y = margin_bottom;
                  let footer_area = CoreRect { x: side_margin, y: footer_y, width: content_width, height: footer_height };
-                 f.render(&mut page.inner, footer_area, &font.inner, font_index, &CorePageContext::default());
+                 f.render(&mut page.inner, footer_area, &font.inner, font_index, &context);
              }
              
              // 3. Render Body with side margins
@@ -481,6 +505,8 @@ impl Document {
                       current_node = Some(tail);
                  }
              }
+             
+             current_page += 1;
         }
         Ok(())
     }
