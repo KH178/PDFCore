@@ -22,5 +22,8 @@
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
     "test": "ava"
+  },
+  "dependencies": {
+    "pdf-parse": "^2.4.5"
   }
 }

@@ -417,7 +417,7 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
     let font_descriptor = PdfObject::Dictionary(vec![
         ("Type".to_string(), PdfObject::Name("FontDescriptor".to_string())),
         ("FontName".to_string(), PdfObject::Name(font.get_name().to_string())),
-        ("Flags".to_string(), PdfObject::Integer(32)),
+        ("Flags".to_string(), PdfObject::Integer(4)), // 4 = Symbolic (required for Identity-H)
         ("FontBBox".to_string(), PdfObject::Array(vec![
             PdfObject::Integer(bbox.0 as i64),
             PdfObject::Integer(bbox.1 as i64),
@@ -433,6 +433,68 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
     ]);
     writer.write_object(font_descriptor_id, &font_descriptor)?;
     
+    // Generate W array (Widths)
+    let w_array = if let Some(gids) = used_gids {
+        // Sort GIDs to produce compact ranges if possible
+        // For MVP, just output [ gid [ width ] ] for each used GID?
+        // Better: [ 0 [ w0 w1 w2 ... ] ] if contiguous, but Identity mapping is sparse if subsetted?
+        // If subsetted with Identity map, the CIDs ARE the GIDs.
+        // So we need to specify widths for the sparse CIDs.
+        // Format: [ c [w] c [w] ... ] is inefficient.
+        // Format: [ first_cid [ w1 w2 ... ] ]
+        // Since we know the used GIDs, we can iterate them in order.
+        let mut sorted_gids: Vec<u16> = gids.iter().copied().collect();
+        sorted_gids.sort();
+        
+        let mut w = Vec::new();
+        // Naive approach: individual entries [ cid [width] ]
+        // Optimizing for ranges is better but more complex.
+        // Let's optimize slightly: group contiguous ranges.
+        // OR: PDF allows: c [w ...].
+        
+        // Actually, if we use subsetting, we only have a few glyphs.
+        // But if we disable subsetting, we have thousands.
+        // Let's stick to individual check for now, optimizing later if slow.
+        // Wait, for full font, writing 65k entries is confusing.
+        // Ideally we should use the font's hmtx table.
+        // But for Identity-H, we just need W for CIDs we use.
+        
+        for gid in sorted_gids {
+            let width = font.get_glyph_width(gid);
+            // Scaling: UnitsPerEm -> 1000
+            let scale = 1000.0 / font.units_per_em() as f32;
+            let pdf_width = (width as f32 * scale) as i64;
+            
+            w.push(PdfObject::Integer(gid as i64));
+            w.push(PdfObject::Array(vec![PdfObject::Integer(pdf_width)]));
+        }
+        PdfObject::Array(w)
+    } else {
+        // Streaming mode: we must provide widths for ALL glyphs since we don't know usage.
+        // We cannot use subsetting, so we embedded the full font.
+        // Now we must provide the W array for the full font.
+        // Ideally we should compress this (use ranges), but for now, let's output a single block for all glyphs.
+        // This is large but correct.
+        
+        
+        let num_glyphs = font.number_of_glyphs();
+        let scale = 1000.0 / font.units_per_em() as f32;
+        let mut widths = Vec::with_capacity(num_glyphs as usize);
+        
+        for gid in 0..num_glyphs {
+            let width = font.get_glyph_width(gid);
+            let pdf_width = (width as f32 * scale) as i64;
+            widths.push(PdfObject::Integer(pdf_width));
+        }
+        
+        // Format: [ 0 [ w0 w1 ... wn ] ] 
+        // Start at CID 0, provide array of all widths
+        PdfObject::Array(vec![
+            PdfObject::Integer(0),
+            PdfObject::Array(widths)
+        ])
+    };
+
     //3. Write CIDFont
     let cid_font = PdfObject::Dictionary(vec![
         ("Type".to_string(), PdfObject::Name("Font".to_string())),
@@ -444,7 +506,9 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
             ("Supplement".to_string(), PdfObject::Integer(0)),
         ])),
         ("FontDescriptor".to_string(), PdfObject::Reference(font_descriptor_id)),
+        ("CIDToGIDMap".to_string(), PdfObject::Name("Identity".to_string())),
         ("DW".to_string(), PdfObject::Integer(1000)),
+        ("W".to_string(), w_array),
     ]);
     writer.write_object(cid_font_id, &cid_font)?;
     

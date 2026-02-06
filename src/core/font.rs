@@ -57,10 +57,16 @@ impl Font {
             .collect()
     }
     
-    /// Measure text width using shaping
+    /// Measure text width using raw glyph widths (matches PDF Identity-H Tj rendering)
     pub fn measure_text(&self, text: &str, size: f64) -> f64 {
         let glyphs = self.shape_text(text, size);
-        glyphs.iter().map(|g| g.x_advance).sum()
+        let scale = size / self.units_per_em as f64;
+        
+        // Sum raw glyph widths from the font metrics directly
+        // This effectively ignores kerning, which matches how we render (Tj with Identity-H)
+        glyphs.iter()
+            .map(|g| self.get_glyph_width(g.glyph_id) as f64 * scale)
+            .sum()
     }
     
     /// Get font metrics
@@ -119,6 +125,17 @@ impl Font {
     pub fn italic_angle(&self) -> f32 {
         let face = self.face.as_face_ref();
         face.italic_angle()
+    }
+
+    /// Get horizontal advance width for a glyph
+    pub fn get_glyph_width(&self, glyph_id: u16) -> u16 {
+        let face = self.face.as_face_ref();
+        face.glyph_hor_advance(owned_ttf_parser::GlyphId(glyph_id)).unwrap_or(0)
+    }
+
+    /// Get number of glyphs in the font
+    pub fn number_of_glyphs(&self) -> u16 {
+        self.face.as_face_ref().number_of_glyphs()
     }
 }
 

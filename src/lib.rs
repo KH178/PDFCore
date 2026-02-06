@@ -9,6 +9,7 @@ use crate::core::page::Page as CorePage;
 use crate::core::document::Document as CoreDocument;
 use crate::core::image::Image as CoreImage;
 use crate::core::table::{Table as CoreTable, TableColumn as CoreTableColumn, TextAlign as CoreTextAlign};
+use crate::core::layout::{LayoutNode as CoreLayoutNode, Column as CoreColumn, Row as CoreRow, TextNode as CoreTextNode, Container as CoreContainer, ImageNode as CoreImageNode, Rect as CoreRect, Constraints as CoreConstraints};
 
 // Helper to map IO errors to N-API errors
 fn map_io_err(e: io::Error) -> Error {
@@ -18,7 +19,7 @@ fn map_io_err(e: io::Error) -> Error {
 /// Represents a loaded font with parsing and shaping capabilities
 #[napi]
 pub struct Font {
-    inner: CoreFont,
+    pub(crate) inner: CoreFont,
 }
 
 #[napi]
@@ -75,6 +76,16 @@ impl Image {
     }
 }
 
+/// Represents a shaped glyph with position and advance information
+#[napi(object)]
+pub struct ShapedGlyph {
+    pub glyph_id: u16,
+    pub x_advance: f64,
+    pub y_advance: f64,
+    pub x_offset: f64,
+    pub y_offset: f64,
+}
+
 /// Column definition for Table
 #[napi(object)]
 pub struct TableColumn {
@@ -112,17 +123,84 @@ impl Table {
     pub fn add_row(&mut self, row: Vec<String>) {
         self.inner.add_row(row);
     }
+    
+    #[napi]
+    pub fn set_font_size(&mut self, size: f64) {
+        self.inner.settings.font_size = size;
+    }
 }
 
-/// Represents a shaped glyph with position and advance information
-#[napi(object)]
-pub struct ShapedGlyph {
-    pub glyph_id: u16,
-    pub x_advance: f64,
-    pub y_advance: f64,
-    pub x_offset: f64,
-    pub y_offset: f64,
+use std::sync::Arc;
+
+/// Opaque wrapper for a Layout Node
+#[napi]
+#[derive(Clone)]
+pub struct LayoutNode {
+     pub(crate) inner: Arc<dyn CoreLayoutNode>,
 }
+
+#[napi]
+impl LayoutNode {
+    /// Create a Column node
+    #[napi(factory)]
+    pub fn column(children: Vec<&LayoutNode>, spacing: Option<f64>) ->  Self {
+        let core_children: Vec<Arc<dyn CoreLayoutNode>> = children.iter()
+            .map(|n| n.inner.clone())
+            .collect();
+            
+        let col = CoreColumn {
+            children: core_children,
+            spacing: spacing.unwrap_or(0.0),
+        };
+        
+        LayoutNode { inner: Arc::new(col) }
+    }
+    
+    #[napi(factory)]
+    pub fn row(children: Vec<&LayoutNode>, spacing: Option<f64>) ->  Self {
+        let core_children: Vec<Arc<dyn CoreLayoutNode>> = children.iter()
+            .map(|n| n.inner.clone())
+            .collect();
+            
+        let row = CoreRow {
+            children: core_children,
+            spacing: spacing.unwrap_or(0.0),
+        };
+        
+        LayoutNode { inner: Arc::new(row) }
+    }
+    
+    #[napi(factory)]
+    pub fn text(text: String, size: f64) -> Self {
+        LayoutNode {
+            inner: Arc::new(CoreTextNode { text, size }),
+        }
+    }
+    
+    #[napi(factory)]
+    pub fn container(child: &LayoutNode, padding: Option<f64>, border: Option<f64>) -> Self {
+        LayoutNode {
+            inner: Arc::new(CoreContainer {
+                child: child.inner.clone(),
+                padding: padding.unwrap_or(0.0),
+                border_width: border.unwrap_or(0.0),
+            }),
+        }
+    }
+    
+    #[napi(factory)]
+    pub fn image(image_index: u32, width: f64, height: f64) -> Self {
+        LayoutNode { 
+            inner: Arc::new(CoreImageNode {
+                image_index,
+                width,
+                height,
+            })
+        }
+    }
+}
+
+// ... ShapedGlyph ... 
 
 /// Represents a single page in a PDF document
 #[napi]
@@ -139,35 +217,26 @@ impl Page {
             inner: CorePage::new(width, height),
         }
     }
-    
-    /// Add text to the page at specified position with given font size
+
+    /// Add text to the page using built-in font (Helvetica)
     #[napi]
     pub fn text(&mut self, text: String, x: f64, y: f64, size: f64) -> &Self {
+        // CorePage needs &str, or String? core/page.rs text() takes String.
         self.inner.text(text, x, y, size);
         self
     }
     
-    /// Add text to the page using a custom font (font_index + 2 for /F2, /F3, etc.)
-    /// /F1 is reserved for built-in Helvetica
-    /// Requires font reference to track glyph usage for subsetting
-    #[napi]
-    pub fn text_with_font(&mut self, text: String, x: f64, y: f64, size: f64, font_index: u32, font: &Font) -> &Self {
-        self.inner.text_with_font(text, x, y, size, font_index, &font.inner);
-        self
-    }
-
     /// Add multiline text with wrapping
     #[napi]
     pub fn text_multiline(&mut self, text: String, x: f64, y: f64, width: f64, size: f64, font_index: u32, font: &Font) -> &Self {
         self.inner.text_multiline(text, x, y, width, size, font_index, &font.inner);
         self
     }
-
-    /// Draw an image on the page
-    /// image_index is the index returned by document.addImage()
+    
+    /// Add text using a custom font (by index)
     #[napi]
-    pub fn draw_image(&mut self, image_index: u32, x: f64, y: f64, width: f64, height: f64) -> &Self {
-        self.inner.draw_image(image_index, x, y, width, height);
+    pub fn text_with_font(&mut self, text: String, x: f64, y: f64, size: f64, font_index: u32, font: &Font) -> &Self {
+        self.inner.text_with_font(text, x, y, size, font_index, &font.inner);
         self
     }
 
@@ -194,8 +263,32 @@ impl Page {
 
     /// Draw a table
     #[napi]
-    pub fn draw_table(&mut self, table: &Table, x: f64, y: f64, font: &Font) -> f64 {
-        self.inner.draw_table(&table.inner, x, y, &font.inner)
+    pub fn draw_table(&mut self, table: &Table, x: f64, y: f64, font: &Font, font_index: u32) -> f64 {
+        self.inner.draw_table(&table.inner, x, y, &font.inner, font_index)
+    }
+
+    /// Render a declarative layout tree
+    #[napi]
+    pub fn render_layout(&mut self, node: &LayoutNode, x: f64, y: f64, width: f64, font: &Font) {
+        // Create constraints based on width (and infinite height for now?)
+        // y in PDF is bottom-up, but layout engine might assume top-down relative to cached pos.
+        // Our layout engine `render` takes a Rect.
+        // We'll give it the bounding box.
+        
+        let constraints = CoreConstraints::loose(width, f64::INFINITY);
+        let size = node.inner.measure(constraints, &font.inner);
+        
+        let area = CoreRect {
+            x,
+            y, // Note: In our current text_multiline, Y is the TOP baseline.
+               // If layout engine assumes Y is top, it flows DOWN.
+               // We need to ensure Y decreases. 
+               // render() in layout components subtracts size.height.
+               // So if we pass Y, it will draw from Y downwards.
+            width: size.width,
+            height: size.height,
+        };
+        
     }
 }
 
@@ -275,3 +368,5 @@ impl Document {
         }
     }
 }
+
+// ... rest of file

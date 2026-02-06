@@ -4,3 +4,4 @@ pub mod page;
 pub mod document;
 pub mod image;
 pub mod table;
+pub mod layout;

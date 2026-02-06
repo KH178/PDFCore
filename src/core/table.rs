@@ -19,6 +19,7 @@ pub struct TableSettings {
     pub border_width: f64,
     pub header_height: f64,
     pub cell_height: f64, // Min height
+    pub font_size: f64,   // Cell font size
 }
 
 impl Default for TableSettings {
@@ -28,6 +29,7 @@ impl Default for TableSettings {
             border_width: 1.0,
             header_height: 30.0,
             cell_height: 20.0,
+            font_size: 10.0,
         }
     }
 }
