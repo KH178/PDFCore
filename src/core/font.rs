@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use owned_ttf_parser::{OwnedFace, AsFaceRef};
 use std::io::{self, Error, ErrorKind};
 
@@ -9,6 +11,8 @@ pub struct Font {
     pub(crate) face: Arc<OwnedFace>,
     pub(crate) name: String,
     pub(crate) units_per_em: u16,
+    // Cache for shaped glyphs - uses RefCell for interior mutability
+    shape_cache: Arc<RefCell<HashMap<(String, u32), Vec<ShapedGlyph>>>>,
 }
 
 impl Font {
@@ -28,12 +32,27 @@ impl Font {
         Ok(Font { 
             face: Arc::new(face), 
             name, 
-            units_per_em 
+            units_per_em,
+            shape_cache: Arc::new(RefCell::new(HashMap::new())),
         })
     }
     
+    
     /// Shape text and return glyph IDs with positions
     pub fn shape_text(&self, text: &str, size: f64) -> Vec<ShapedGlyph> {
+        // Convert size to u32 for cache key (precision to 0.01)
+        let size_key = (size * 100.0) as u32;
+        let cache_key = (text.to_string(), size_key);
+        
+        // Check cache first
+        {
+            let cache = self.shape_cache.borrow();
+            if let Some(glyphs) = cache.get(&cache_key) {
+                return glyphs.clone();
+            }
+        }
+        
+        // Cache miss - shape the text
         let mut buffer = rustybuzz::UnicodeBuffer::new();
         buffer.push_str(text);
         
@@ -46,7 +65,7 @@ impl Font {
         
         let scale = size / self.units_per_em as f64;
         
-        infos.iter().zip(positions.iter())
+        let glyphs: Vec<ShapedGlyph> = infos.iter().zip(positions.iter())
             .map(|(info, pos)| ShapedGlyph {
                 glyph_id: info.glyph_id as u16,
                 x_advance: pos.x_advance as f64 * scale,
@@ -54,7 +73,12 @@ impl Font {
                 x_offset: pos.x_offset as f64 * scale,
                 y_offset: pos.y_offset as f64 * scale,
             })
-            .collect()
+            .collect();
+        
+        // Store in cache
+        self.shape_cache.borrow_mut().insert(cache_key, glyphs.clone());
+        
+        glyphs
     }
     
     /// Measure text width using raw glyph widths (matches PDF Identity-H Tj rendering)

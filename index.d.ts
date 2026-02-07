@@ -13,8 +13,15 @@ export interface ShapedGlyph {
 }
 /**
  * Column definition for Table
- * Template for repeating headers and footers
+ * Color structure (RGB/RGBA)
  */
+export interface Color {
+  r: number
+  g: number
+  b: number
+  a?: number
+}
+/** Template for repeating headers and footers */
 export interface Template {
   marginTop?: number
   marginBottom?: number
@@ -51,7 +58,7 @@ export declare class LayoutNode {
   /** Create a Column node */
   static column(children: Array<LayoutNode>, spacing?: number | undefined | null): LayoutNode
   static row(children: Array<LayoutNode>, spacing?: number | undefined | null): LayoutNode
-  static text(text: string, size: number): LayoutNode
+  static text(text: string, size: number, color?: Color | undefined | null, backgroundColor?: Color | undefined | null): LayoutNode
   static container(child: LayoutNode, padding?: number | undefined | null, border?: number | undefined | null): LayoutNode
   static image(imageIndex: number, width: number, height: number): LayoutNode
   static table(table: Table): LayoutNode

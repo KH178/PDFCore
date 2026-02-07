@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { Font, Image, Table, LayoutNode, Page, Document } = nativeBinding
+const { Font, Image, Table, LayoutNode, Page, Document, Template } = nativeBinding
 
 module.exports.Font = Font
 module.exports.Image = Image
@@ -318,3 +318,4 @@ module.exports.Table = Table
 module.exports.LayoutNode = LayoutNode
 module.exports.Page = Page
 module.exports.Document = Document
+module.exports.Template = Template

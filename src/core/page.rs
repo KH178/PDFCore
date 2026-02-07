@@ -58,8 +58,8 @@ impl Page {
         }
         hex_content.push('>');
         
-        // Ensure black color (0 g) and text object
-        let content = format!("q 0 g BT /{} {} Tf {} {} Td {} Tj ET Q ", font_name, size, x, y, hex_content);
+        // Render text (color should be set before calling this method)
+        let content = format!("q BT /{} {} Tf {} {} Td {} Tj ET Q ", font_name, size, x, y, hex_content);
         self.content.extend(content.into_bytes());
         self
     }
@@ -150,6 +150,37 @@ impl Page {
             let line_text = buffer.join(" ");
             self.text_with_font(line_text, x, current_y, size, font_index, font);
         }
+        
+        self
+    }
+    
+    /// Add multiline text with color support
+    pub fn text_multiline_colored(&mut self, text: String, x: f64, y: f64, width: f64, size: f64, font_index: u32, font: &Font, color: crate::core::color::Color) -> &mut Self {
+        // Set text color using PDF operator
+        let color_op = color.to_pdf_fill();
+        self.content.extend(color_op.as_bytes());
+        self.content.push(b' ');
+        
+        // Call standard text_multiline
+        self.text_multiline(text, x, y, width, size, font_index, font)
+    }
+    
+    /// Draw a filled rectangle with specified color
+    pub fn draw_rect_filled(&mut self, x: f64, y: f64, width: f64, height: f64, color: crate::core::color::Color) -> &mut Self {
+        // Save graphics state
+        self.content.extend(b"q ");
+        
+        // Set fill color and draw rectangle
+        let color_op = color.to_pdf_fill();
+        self.content.extend(color_op.as_bytes());
+        self.content.push(b' ');
+        
+        // Draw filled rectangle: x y width height re f
+        let rect_cmd = format!("{} {} {} {} re f ", x, y, width, height);
+        self.content.extend(rect_cmd.as_bytes());
+        
+        // Restore graphics state
+        self.content.extend(b"Q ");
         
         self
     }

@@ -10,6 +10,7 @@ use crate::core::document::Document as CoreDocument;
 use crate::core::image::Image as CoreImage;
 use crate::core::table::{Table as CoreTable, TableColumn as CoreTableColumn, TextAlign as CoreTextAlign};
 use crate::core::layout::{LayoutNode as CoreLayoutNode, Column as CoreColumn, Row as CoreRow, TextNode as CoreTextNode, Container as CoreContainer, ImageNode as CoreImageNode, Rect as CoreRect, Constraints as CoreConstraints, SplitAction, PageContext as CorePageContext};
+use crate::core::template::Template as CoreTemplate;
 
 // Helper to map IO errors to N-API errors
 fn map_io_err(e: io::Error) -> Error {
@@ -87,10 +88,20 @@ pub struct ShapedGlyph {
 }
 
 /// Column definition for Table
+/// Color structure (RGB/RGBA)
+#[napi(object)]
+#[derive(Clone, Copy)]
+pub struct Color {
+    pub r: f64,
+    pub g: f64,
+    pub b: f64,
+    pub a: Option<f64>,
+}
+
 /// Template for repeating headers and footers
 #[napi(object)]
 #[derive(Clone)]
-pub struct Template {
+pub struct PageTemplate {
     pub margin_top: Option<f64>,
     pub margin_bottom: Option<f64>,
 }
@@ -138,6 +149,32 @@ impl Table {
     }
 }
 
+
+
+/// Template loaded from JSON
+#[napi]
+pub struct Template {
+    inner: CoreTemplate,
+}
+
+#[napi]
+impl Template {
+    /// Load template from JSON string
+    #[napi(factory)]
+    pub fn from_json(json: String) -> Result<Self> {
+        let inner = CoreTemplate::from_json(&json).map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(Template { inner })
+    }
+
+    /// Convert template to a LayoutNode for rendering
+    #[napi]
+    pub fn to_layout(&self) -> LayoutNode {
+        LayoutNode {
+            inner: self.inner.to_layout_node()
+        }
+    }
+}
+
 use std::sync::Arc;
 
 /// Opaque wrapper for a Layout Node
@@ -179,9 +216,20 @@ impl LayoutNode {
     }
     
     #[napi(factory)]
-    pub fn text(text: String, size: f64) -> Self {
+    pub fn text(text: String, size: f64, color: Option<Color>, background_color: Option<Color>) -> Self {
+        let normalize = |c: Color| {
+            if c.r > 1.0 || c.g > 1.0 || c.b > 1.0 {
+                crate::core::color::Color::rgba(c.r / 255.0, c.g / 255.0, c.b / 255.0, c.a.unwrap_or(1.0))
+            } else {
+                crate::core::color::Color::rgba(c.r, c.g, c.b, c.a.unwrap_or(1.0))
+            }
+        };
+
+        let core_color = color.map(normalize);
+        let core_background_color = background_color.map(normalize);
+        
         LayoutNode {
-            inner: Arc::new(CoreTextNode { text, size }),
+            inner: Arc::new(CoreTextNode { text, size, color: core_color, background_color: core_background_color }),
         }
     }
     
@@ -417,7 +465,7 @@ impl Document {
         font_index: u32,
         header: Option<&LayoutNode>,
         footer: Option<&LayoutNode>,
-        template: Option<Template>
+        template: Option<PageTemplate>
     ) -> Result<()> {
         let header_node = header.map(|h| h.inner.clone());
         let footer_node = footer.map(|f| f.inner.clone());

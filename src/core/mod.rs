@@ -6,3 +6,6 @@ pub mod image;
 pub mod table;
 pub mod layout;
 pub mod text;
+pub mod color;
+pub mod glyph_cache;
+pub mod template;

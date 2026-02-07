@@ -1,6 +1,6 @@
 [package]
 name = "ai_pdf_writer"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2024"
 
 [lib]
@@ -15,6 +15,14 @@ rustybuzz = "0.20"
 subsetter = "0.1"
 image = { version = "0.24", default-features = false, features = ["jpeg", "png"] }
 flate2 = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [build-dependencies]
 napi-build = "2.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

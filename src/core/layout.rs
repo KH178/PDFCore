@@ -264,6 +264,8 @@ impl LayoutNode for Row {
 pub struct TextNode {
     pub text: String,
     pub size: f64,
+    pub color: Option<crate::core::color::Color>,
+    pub background_color: Option<crate::core::color::Color>,
 }
 
 impl LayoutNode for TextNode {
@@ -284,8 +286,17 @@ impl LayoutNode for TextNode {
         Size { width, height: lines as f64 * leading }
     }
 
-    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
-        page.text_multiline(self.text.clone(), area.x, area.y, area.width, self.size, font_index, font);
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, _context: &PageContext) {
+        // Draw background first if specified
+        // area.y is TOP of text area, but PDF rectangles use bottom-left coordinates
+        if let Some(bg_color) = self.background_color {
+            let bottom_y = area.y - area.height;
+            page.draw_rect_filled(area.x, bottom_y, area.width, area.height, bg_color);
+        }
+        
+        // Draw text with color on top of background
+        let color = self.color.unwrap_or(crate::core::color::Color::black());
+        page.text_multiline_colored(self.text.clone(), area.x, area.y, area.width, self.size, font_index, font, color);
     }
 
     fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction {
@@ -302,8 +313,8 @@ impl LayoutNode for TextNode {
         let (head, tail_opt) = text::split_text_at_lines(&self.text, available_width, self.size, font, max_lines);
         
         if let Some(tail) = tail_opt {
-            let head_node: Arc<dyn LayoutNode> = Arc::new(TextNode { text: head, size: self.size });
-            let tail_node: Arc<dyn LayoutNode> = Arc::new(TextNode { text: tail, size: self.size });
+            let head_node: Arc<dyn LayoutNode> = Arc::new(TextNode { text: head, size: self.size, color: self.color, background_color: self.background_color });
+            let tail_node: Arc<dyn LayoutNode> = Arc::new(TextNode { text: tail, size: self.size, color: self.color, background_color: self.background_color });
             SplitAction::Split(head_node, tail_node)
         } else {
             // Fits completely

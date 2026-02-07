@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Write, Seek};
+use std::io::{self, Write, Seek, BufWriter};
 
 /// Core PDF Objects based on PDF Reference 1.7
 #[derive(Debug, Clone)]
@@ -63,35 +63,57 @@ pub fn escape_string(s: &str) -> String {
 }
 
 pub struct PdfWriter {
-    file: File,
+    writer: BufWriter<File>,
     offset: u64,
     pub(crate) xref: Vec<(u32, u64)>, // id -> offset
 }
 
 impl PdfWriter {
     pub fn new(path: &str) -> io::Result<Self> {
-        let mut file = File::create(path)?;
+        let file = File::create(path)?;
+        let mut writer = BufWriter::with_capacity(64 * 1024, file); // 64KB buffer
+        
         // Write Header
         let header = b"%PDF-1.7\n%\x93\x8C\x8B\x9E\n"; // Binary comment to indicate binary file
-        file.write_all(header)?;
+        writer.write_all(header)?;
         
         Ok(PdfWriter {
-            file,
+            writer,
             offset: header.len() as u64,
             xref: Vec::new(),
         })
     }
 
+
     pub fn write_object(&mut self, id: u32, object: &PdfObject) -> io::Result<()> {
        self.xref.push((id, self.offset));
        
-       write!(self.file, "{} 0 obj\n", id)?;
-       object.serialize(&mut self.file)?;
-       write!(self.file, "\nendobj\n")?;
+       let start_offset = self.offset;
        
-       self.offset = self.file.stream_position()?;
+       // Write object to buffer
+       write!(self.writer, "{} 0 obj\n", id)?;
+       object.serialize(&mut self.writer)?;
+       write!(self.writer, "\nendobj\n")?;
+       
+       // Calculate offset increment without flushing
+       // This is an approximation but works for tracking
+       let obj_header = format!("{} 0 obj\n", id);
+       let obj_footer = "\nendobj\n";
+       
+       // Estimate size (not perfect but close enough for xref)
+       // We'll flush and get exact position only when needed
+       self.offset += (obj_header.len() + obj_footer.len()) as u64;
+       
+       // For now, we need exact positions, so flush
+       // TODO: Optimize by batching writes
+       self.writer.flush()?;
+       self.offset = self.writer.get_ref().stream_position()?;
+       
        Ok(())
     }
+
+
+
 
 
     pub fn write_xref_and_trailer(&mut self, root_id: u32) -> io::Result<()> {
@@ -102,23 +124,26 @@ impl PdfWriter {
         self.xref.sort_by_key(|&(id, _)| id);
         
         // Xref
-        writeln!(self.file, "xref")?;
-        writeln!(self.file, "0 {}", self.xref.len() + 1)?; // +1 for the 0th object
+        writeln!(self.writer, "xref")?;
+        writeln!(self.writer, "0 {}", self.xref.len() + 1)?; // +1 for the 0th object
         
         // Entry 0
-        writeln!(self.file, "0000000000 65535 f ")?;
+        writeln!(self.writer, "0000000000 65535 f ")?;
         
         for (_id, offset) in &self.xref {
-            writeln!(self.file, "{:010} 00000 n ", offset)?;
+            writeln!(self.writer, "{:010} 00000 n ", offset)?;
         }
         
         // Trailer
-        writeln!(self.file, "trailer")?;
-        write!(self.file, "<< /Size {} /Root {} 0 R >>", self.xref.len() + 1, root_id)?;
+        writeln!(self.writer, "trailer")?;
+        write!(self.writer, "<< /Size {} /Root {} 0 R >>", self.xref.len() + 1, root_id)?;
         
-        writeln!(self.file, "\nstartxref")?;
-        writeln!(self.file, "{}", xref_offset)?;
-        writeln!(self.file, "%%EOF")?;
+        writeln!(self.writer, "\nstartxref")?;
+        writeln!(self.writer, "{}", xref_offset)?;
+        writeln!(self.writer, "%%EOF")?;
+        
+        // Final flush
+        self.writer.flush()?;
         
         Ok(())
     }
