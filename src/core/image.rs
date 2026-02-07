@@ -17,14 +17,17 @@ impl Image {
     /// Supports JPEG (passed through) and PNG (decompressed to raw RGB)
     pub fn from_file(path: &str) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        
+        Self::from_bytes(&bytes)
+    }
+
+    pub fn from_bytes(data: &[u8]) -> io::Result<Self> {
         // Use image crate to guess format
-        let format = image::guess_format(&bytes)
+        let format = image::guess_format(data)
             .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Unknown image format: {}", e)))?;
 
         match format {
-            ImageFormat::Jpeg => Self::load_jpeg(&bytes),
-            ImageFormat::Png => Self::load_png(&bytes),
+            ImageFormat::Jpeg => Self::load_jpeg(data),
+            ImageFormat::Png => Self::load_png(data),
             _ => Err(Error::new(ErrorKind::Unsupported, "Only JPEG and PNG are supported")),
         }
     }

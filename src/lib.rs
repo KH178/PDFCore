@@ -75,6 +75,13 @@ impl Image {
         let inner = CoreImage::from_file(&path).map_err(map_io_err)?;
         Ok(Image { inner })
     }
+
+    /// Load an image from bytes
+    #[napi(factory)]
+    pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
+        let inner = CoreImage::from_bytes(&data).map_err(map_io_err)?;
+        Ok(Image { inner })
+    }
 }
 
 /// Represents a shaped glyph with position and advance information
@@ -165,6 +172,13 @@ impl Template {
     #[napi(factory)]
     pub fn from_json(json: String) -> Result<Self> {
         let inner = CoreTemplate::from_json(&json).map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(Template { inner })
+    }
+
+    /// Load template from .pdfCoret (zip) file
+    #[napi(factory)]
+    pub fn from_zip(path: String) -> Result<Self> {
+        let inner = CoreTemplate::from_zip(&path).map_err(|e| Error::from_reason(e))?;
         Ok(Template { inner })
     }
 
@@ -465,6 +479,22 @@ impl Document {
             doc.write_to(&path).map_err(map_io_err)
         } else {
             Err(Error::new(Status::GenericFailure, "Document is finalized".to_string()))
+        }
+    }
+
+    /// Register assets from a loaded Template into this Document
+    /// This is required if the template contains images.
+    #[napi]
+    pub fn register_template_assets(&mut self, template: &mut Template) -> Result<()> {
+        if let Some(doc) = &mut self.inner {
+             for (name, bytes) in &template.inner.assets {
+                 let img = CoreImage::from_bytes(bytes).map_err(map_io_err)?;
+                 let idx = doc.add_image(&img).map_err(map_io_err)?;
+                 template.inner.asset_indices.insert(name.clone(), idx);
+             }
+             Ok(())
+        } else {
+             Err(Error::new(Status::GenericFailure, "Document is finalized".to_string()))
         }
     }
 

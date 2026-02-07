@@ -64,19 +64,54 @@ pub enum TemplateNode {
 pub struct Template {
     pub root: TemplateNode,
     pub name: Option<String>,
+    #[serde(skip)]
+    pub assets: std::collections::HashMap<String, Vec<u8>>,
+    #[serde(skip)]
+    pub asset_indices: std::collections::HashMap<String, u32>,
 }
 
 impl Template {
     pub fn from_json(json: &str) -> serde_json::Result<Self> {
-        serde_json::from_str(json)
+        let mut t: Template = serde_json::from_str(json)?;
+        t.assets = std::collections::HashMap::new();
+        t.asset_indices = std::collections::HashMap::new();
+        Ok(t)
+    }
+
+    pub fn from_zip(path: &str) -> Result<Self, String> {
+        let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        
+        // 1. Read layout.json
+        let mut layout_file = archive.by_name("layout.json").map_err(|_| "layout.json not found in archive".to_string())?;
+        let mut json = String::new();
+        std::io::Read::read_to_string(&mut layout_file, &mut json).map_err(|e| e.to_string())?;
+        drop(layout_file);
+        
+        let mut template: Template = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        template.assets = std::collections::HashMap::new();
+        template.asset_indices = std::collections::HashMap::new();
+        
+        // 2. Read all other files as assets
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+            let name = file.name().to_string();
+            if name == "layout.json" || name.ends_with('/') { continue; }
+            
+            let mut buffer = Vec::new();
+            std::io::Read::read_to_end(&mut file, &mut buffer).map_err(|e| e.to_string())?;
+            template.assets.insert(name, buffer);
+        }
+        
+        Ok(template)
     }
 
     pub fn to_layout_node(&self) -> std::sync::Arc<dyn crate::core::layout::LayoutNode> {
-        self.root.to_layout_node(&serde_json::Value::Null)
+        self.root.to_layout_node(&serde_json::Value::Null, &self.asset_indices)
     }
 
     pub fn render(&self, data: &serde_json::Value) -> std::sync::Arc<dyn crate::core::layout::LayoutNode> {
-        self.root.to_layout_node(data)
+        self.root.to_layout_node(data, &self.asset_indices)
     }
 }
 
@@ -158,14 +193,14 @@ fn resolve_json_path(path: &str, data: &Value) -> Option<String> {
 }
 
 impl TemplateNode {
-    pub fn to_layout_node(&self, data: &Value) -> Arc<dyn CoreLayoutNode> {
+    pub fn to_layout_node(&self, data: &Value, asset_indices: &std::collections::HashMap<String, u32>) -> Arc<dyn CoreLayoutNode> {
         match self {
             TemplateNode::Column { children, spacing } => {
-                let nodes: Vec<Arc<dyn CoreLayoutNode>> = children.iter().map(|c| c.to_layout_node(data)).collect();
+                let nodes: Vec<Arc<dyn CoreLayoutNode>> = children.iter().map(|c| c.to_layout_node(data, asset_indices)).collect();
                 Arc::new(Column { children: nodes, spacing: spacing.unwrap_or(0.0) })
             },
             TemplateNode::Row { children, spacing } => {
-                let nodes = children.iter().map(|c| c.to_layout_node(data)).collect();
+                let nodes = children.iter().map(|c| c.to_layout_node(data, asset_indices)).collect();
                 Arc::new(Row { children: nodes, spacing: spacing.unwrap_or(0.0) })
             },
             TemplateNode::Text { content, size, color, background_color, width: _ } => {
@@ -181,14 +216,19 @@ impl TemplateNode {
             },
             TemplateNode::Container { child, padding, border } => {
                  Arc::new(Container {
-                     child: child.to_layout_node(data),
+                     child: child.to_layout_node(data, asset_indices),
                      padding: padding.unwrap_or(0.0),
                      border_width: border.unwrap_or(0.0),
                  })
             },
-            TemplateNode::Image { src: _, width, height } => {
+            TemplateNode::Image { src, width, height } => {
+                // Resolve "src" from asset_indices
+                // If not found, use 0 (default/placeholder) or we should error?
+                // For now, default to 0 to avoid crashing if asset missing.
+                let index = *asset_indices.get(src).unwrap_or(&0);
+                
                 Arc::new(ImageNode {
-                    image_index: 0, 
+                    image_index: index, 
                     width: *width, 
                     height: *height 
                 })
@@ -206,27 +246,17 @@ impl TemplateNode {
                  
                  // 2. If data binding exists, fetch array and iterate
                  if let Some(path_str) = data_path {
-                     // Check if path is "{{ var }}" or just "var"?
-                     // Implementation plan says "{{ items }}".
-                     // resolve_template_string handles that. 
-                     // But here we need the ARRAY OBJECT, not string.
-                     
                      let clean_path = if path_str.starts_with("{{") && path_str.ends_with("}}") {
                          path_str[2..path_str.len()-2].trim()
                      } else {
                          path_str.as_str()
                      };
 
-                     // We need a helper that returns Value reference, not String
                      if let Some(array_val) = get_value_by_path(clean_path, data) {
                          if let Value::Array(arr) = array_val {
                              for item in arr {
                                  let mut row_vec = Vec::new();
                                  for col in columns {
-                                     // Column should have `field`. 
-                                     // If field is present, lookup in item.
-                                     // If field missing, empty?
-                                     
                                      if let Some(field) = &col.field {
                                           let val = resolve_json_path(field, item).unwrap_or_default();
                                           row_vec.push(val);
