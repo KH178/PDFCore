@@ -549,7 +549,14 @@ pub struct PageNumberNode {
 impl LayoutNode for PageNumberNode {
     fn measure(&self, constraints: Constraints, font: &Font) -> Size {
         // For measurement, replace placeholders with maximum expected values
-        let sample_text = self.format.replace("{page}", "999").replace("{total}", "999");
+        // For measurement, replace placeholders with maximum expected values
+        let sample_text = self.format
+            .replace("{{ page }}", "999")
+            .replace("{{ total }}", "999")
+            .replace("{{page}}", "999")
+            .replace("{{total}}", "999")
+            .replace("{page}", "999")
+            .replace("{total}", "999");
         let lines = text::calculate_text_lines(&sample_text, constraints.max_width, self.size, font);
         let leading = self.size * 1.2;
         Size { width: constraints.max_width, height: lines as f64 * leading }
@@ -557,7 +564,13 @@ impl LayoutNode for PageNumberNode {
 
     fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
         // Replace placeholders with actual values from context
+        // Replace placeholders with actual values from context
+        // Support both {page} and {{ page }} styles
         let resolved_text = self.format
+            .replace("{{ page }}", &context.current.to_string())
+            .replace("{{ total }}", &context.total.to_string())
+            .replace("{{page}}", &context.current.to_string())
+            .replace("{{total}}", &context.total.to_string())
             .replace("{page}", &context.current.to_string())
             .replace("{total}", &context.total.to_string());
         

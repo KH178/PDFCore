@@ -85,7 +85,7 @@ export declare class Page {
   /** Draw an image */
   drawImage(imageIndex: number, x: number, y: number, width: number, height: number): this
   /** Render a declarative layout tree */
-  renderLayout(node: LayoutNode, x: number, y: number, width: number, font: Font, fontIndex: number): void
+  renderLayout(node: LayoutNode, x: number, y: number, width: number, font: Font, fontIndex: number, currentPage?: number | undefined | null, totalPages?: number | undefined | null): void
 }
 /** Represents a PDF document with multiple pages */
 export declare class Document {

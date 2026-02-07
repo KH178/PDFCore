@@ -1,0 +1,115 @@
+{
+    "root": {
+        "type": "Container",
+        "padding": 40,
+        "child": {
+            "type": "Column",
+            "spacing": 20,
+            "children": [
+                {
+                    "type": "Row",
+                    "children": [
+                        {
+                            "type": "Image",
+                            "src": "logo.png",
+                            "width": 60,
+                            "height": 60
+                        },
+                        {
+                            "type": "Container",
+                            "padding": 0,
+                            "child": {
+                                "type": "Column",
+                                "spacing": 5,
+                                "children": [
+                                    { 
+                                        "type": "Text", 
+                                        "content": "INVOICE", 
+                                        "size": 24, 
+                                        "color": { "r": 0.2, "g": 0.2, "b": 0.8 },
+                                        "align": "right" 
+                                    },
+                                    { "type": "Text", "content": "#{{ invoice_number }}", "size": 12, "color": { "r": 0.5, "g": 0.5, "b": 0.5 } }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                { "type": "Container", "padding": 10, "child": { "type": "Column", "children": [] } }, 
+                {
+                    "type": "Row",
+                    "spacing": 50,
+                    "children": [
+                        {
+                            "type": "Column",
+                            "spacing": 5,
+                            "children": [
+                                { "type": "Text", "content": "Bill To:", "size": 10, "color": { "r": 0.6, "g": 0.6, "b": 0.6 } },
+                                { "type": "Text", "content": "{{ customer.name }}", "size": 12, "width": 200 },
+                                { "type": "Text", "content": "{{ customer.address }}", "size": 10, "width": 200 },
+                                { "type": "Text", "content": "{{ customer.email }}", "size": 10, "width": 200 }
+                            ]
+                        },
+                        {
+                            "type": "Column",
+                            "spacing": 5,
+                            "children": [
+                                { "type": "Text", "content": "Details:", "size": 10, "color": { "r": 0.6, "g": 0.6, "b": 0.6 } },
+                                { "type": "Text", "content": "Date: {{ date }}", "size": 10 },
+                                { "type": "Text", "content": "Due Date: {{ due_date }}", "size": 10 }
+                            ]
+                        }
+                    ]
+                },
+                { "type": "Container", "padding": 20, "child": { "type": "Column", "children": [] } },
+                {
+                    "type": "Table",
+                    "data": "{{ items }}",
+                    "settings": { "font_color": { "r": 0.0, "g": 0.0, "b": 0.0 } },
+                    "columns": [
+                        { "header": "Description", "field": "desc", "width": 250, "align": "left" },
+                        { "header": "Qty", "field": "qty", "width": 50, "align": "center" },
+                        { "header": "Unit Price", "field": "price", "width": 80, "align": "right" },
+                        { "header": "Total", "field": "total", "width": 80, "align": "right" }
+                    ]
+                },
+                { "type": "Container", "padding": 10, "child": { "type": "Column", "children": [] } },
+                {
+                    "type": "Row",
+                    "children": [
+                        { "type": "Column", "children": [], "width": 300 },
+                        {
+                            "type": "Column",
+                            "spacing": 5,
+                            "children": [
+                                { "type": "Text", "content": "Subtotal: ${{ subtotal }}", "size": 10, "align": "right" },
+                                { "type": "Text", "content": "Tax ({{ tax_rate }}%): ${{ tax }}", "size": 10, "align": "right" },
+                                { 
+                                    "type": "Text", 
+                                    "content": "Total: ${{ grand_total }}", 
+                                    "size": 14, 
+                                    "align": "right",
+                                    "color": { "r": 0, "g": 0, "b": 0 } 
+                                }
+                            ]
+                        }
+                    ]
+                },
+                { "type": "Container", "padding": 40, "child": { "type": "Column", "children": [] } },
+                {
+                    "type": "Text",
+                    "content": "Thank you for your business!",
+                    "size": 10,
+                    "align": "center",
+                    "color": { "r": 0.5, "g": 0.5, "b": 0.5 }
+                },
+                {
+                    "type": "PageNumber",
+                    "format": "Page {{ page }} / {{ total }}",
+                    "size": 8,
+                    "align": "center"
+                }
+            ]
+        }
+    }
+}

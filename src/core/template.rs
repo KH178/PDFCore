@@ -96,6 +96,7 @@ impl Template {
         for i in 0..archive.len() {
             let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
             let name = file.name().to_string();
+            
             if name == "layout.json" || name.ends_with('/') { continue; }
             
             let mut buffer = Vec::new();

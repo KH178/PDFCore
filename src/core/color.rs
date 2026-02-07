@@ -6,8 +6,11 @@ pub struct Color {
     pub r: f64,  // 0.0 to 1.0
     pub g: f64,
     pub b: f64,
+    #[serde(default = "default_alpha")]
     pub a: f64,  // alpha (1.0 = opaque)
 }
+
+fn default_alpha() -> f64 { 1.0 }
 
 impl Color {
     /// Create RGB color (opaque)

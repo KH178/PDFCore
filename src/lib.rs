@@ -381,12 +381,32 @@ impl Page {
 
     /// Render a declarative layout tree
     #[napi]
-    pub fn render_layout(&mut self, node: &LayoutNode, x: f64, y: f64, width: f64, font: &Font, font_index: u32) {
+    pub fn render_layout(
+        &mut self, 
+        node: &LayoutNode, 
+        x: f64, 
+        y: f64, 
+        width: f64, 
+        font: &Font, 
+        font_index: u32,
+        current_page: Option<u32>,
+        total_pages: Option<u32>
+    ) {
         // Create constraints based on width (and infinite height for now?)
         // y in PDF is bottom-up, but layout engine might assume top-down relative to cached pos.
         // Our layout engine `render` takes a Rect.
         // We'll give it the bounding box.
         
+        // Construct page context
+        let context = if let (Some(c), Some(t)) = (current_page, total_pages) {
+            crate::core::layout::PageContext {
+                current: c as usize,
+                total: t as usize,
+            }
+        } else {
+            crate::core::layout::PageContext::default()
+        };
+
         let constraints = CoreConstraints::loose(width, f64::INFINITY);
         let size = node.inner.measure(constraints, &font.inner);
         
@@ -401,7 +421,7 @@ impl Page {
             height: size.height,
         };
         
-        node.inner.render(&mut self.inner, area, &font.inner, font_index, &CorePageContext::default());
+        node.inner.render(&mut self.inner, area, &font.inner, font_index, &context);
         
     }
 }
@@ -581,17 +601,17 @@ impl Document {
              // 3. Render Body with side margins
              match node.split(content_width, body_available_height, &font.inner) {
                  SplitAction::Fit => {
-                      page.render_layout(&LayoutNode { inner: node }, side_margin, body_start_y, content_width, font, font_index);
+                      page.render_layout(&LayoutNode { inner: node }, side_margin, body_start_y, content_width, font, font_index, Some(current_page as u32), Some(page_count as u32));
                       self.add_page(&page)?;
                       current_node = None;
                  },
                  SplitAction::Push => {
-                      page.render_layout(&LayoutNode { inner: node }, side_margin, body_start_y, content_width, font, font_index);
+                      page.render_layout(&LayoutNode { inner: node }, side_margin, body_start_y, content_width, font, font_index, Some(current_page as u32), Some(page_count as u32));
                       self.add_page(&page)?;
                       current_node = None;
                  },
                  SplitAction::Split(head, tail) => {
-                      page.render_layout(&LayoutNode { inner: head }, side_margin, body_start_y, content_width, font, font_index);
+                      page.render_layout(&LayoutNode { inner: head }, side_margin, body_start_y, content_width, font, font_index, Some(current_page as u32), Some(page_count as u32));
                       self.add_page(&page)?;
                       
                       current_node = Some(tail);

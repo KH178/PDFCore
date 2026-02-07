@@ -247,6 +247,11 @@ impl Page {
         
         // Header Content
         let mut current_x = x;
+        // Set text color for header
+        let color_op = s.font_color.to_pdf_fill();
+        self.content.extend(color_op.as_bytes());
+        self.content.push(b' ');
+
         for col in &table.columns {
             // Draw text centered vertically in header
             let text_y = current_y - (header_height / 2.0) - 4.0; // aprox centering
@@ -284,14 +289,16 @@ impl Page {
                 let width = if i < table.columns.len() { table.columns[i].width } else { 100.0 };
                 
                 // Draw text
-                self.text_multiline(
+                // Explicitly use colored text to ensure reset
+                self.text_multiline_colored(
                     cell_text.clone(), 
                     current_x + s.padding, 
                     current_y - s.padding - 8.0, // Top padding
                     width - (2.0 * s.padding), 
                     font_size,
                     font_index, // Use passed font index
-                    font
+                    font,
+                    s.font_color
                 );
                 
                 // Vertical border

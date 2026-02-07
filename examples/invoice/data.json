@@ -1,0 +1,20 @@
+{
+    "invoice_number": "INV-2024-001",
+    "date": "2024-02-08",
+    "due_date": "2024-03-08",
+    "customer": {
+        "name": "Tech Corp Industries",
+        "address": "123 Innovation Blvd, Silicon Valley, CA 94025",
+        "email": "accounts@techcorp.com"
+    },
+    "items": [
+        { "desc": "Consulting Services - Architecture Design", "qty": 40, "price": "150.00", "total": "6000.00" },
+        { "desc": "Cloud Infrastructure Setup", "qty": 1, "price": "2500.00", "total": "2500.00" },
+        { "desc": "Security Audit", "qty": 1, "price": "1200.00", "total": "1200.00" },
+        { "desc": "Monthly Maintenance (Feb)", "qty": 1, "price": "500.00", "total": "500.00" }
+    ],
+    "subtotal": "10200.00",
+    "tax_rate": "8.5",
+    "tax": "867.00",
+    "grand_total": "11067.00"
+}

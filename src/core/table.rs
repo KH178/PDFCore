@@ -34,6 +34,8 @@ pub struct TableSettings {
     pub cell_height: f64,
     #[serde(default = "default_font_size")]
     pub font_size: f64,
+    #[serde(default = "default_font_color")]
+    pub font_color: crate::core::color::Color,
 }
 
 fn default_padding() -> f64 { 5.0 }
@@ -41,6 +43,7 @@ fn default_border() -> f64 { 1.0 }
 fn default_header_height() -> f64 { 30.0 }
 fn default_cell_height() -> f64 { 20.0 }
 fn default_font_size() -> f64 { 10.0 }
+fn default_font_color() -> crate::core::color::Color { crate::core::color::Color::black() }
 
 impl Default for TableSettings {
     fn default() -> Self {
@@ -50,6 +53,7 @@ impl Default for TableSettings {
             header_height: default_header_height(),
             cell_height: default_cell_height(),
             font_size: default_font_size(),
+            font_color: default_font_color(),
         }
     }
 }
