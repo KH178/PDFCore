@@ -111,6 +111,7 @@ pub struct TableColumn {
     pub header: String,
     pub width: f64,
     pub align: Option<String>, // "Left", "Center", "Right"
+    pub field: Option<String>,
 }
 
 /// Data Table with headers and rows
@@ -131,6 +132,7 @@ impl Table {
                 Some("Right") => CoreTextAlign::Right,
                 _ => CoreTextAlign::Left,
             },
+            field: c.field,
         }).collect();
         
         Table {
@@ -168,10 +170,22 @@ impl Template {
 
     /// Convert template to a LayoutNode for rendering
     #[napi]
-    pub fn to_layout(&self) -> LayoutNode {
-        LayoutNode {
-            inner: self.inner.to_layout_node()
-        }
+    pub fn to_layout(&self, data_json: Option<String>) -> Result<LayoutNode> {
+        let data = if let Some(json) = data_json {
+            serde_json::from_str(&json).map_err(|e| Error::from_reason(format!("Data JSON Error: {}", e)))?
+        } else {
+            serde_json::Value::Null
+        };
+        
+        Ok(LayoutNode {
+            inner: self.inner.render(&data)
+        })
+    }
+
+    /// Alias for to_layout with data
+    #[napi]
+    pub fn render(&self, data_json: String) -> Result<LayoutNode> {
+        self.to_layout(Some(data_json))
     }
 }
 

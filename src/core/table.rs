@@ -1,35 +1,55 @@
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TextAlign {
     Left,
     Center,
     Right,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableColumn {
     pub header: String,
     pub width: f64,
+    #[serde(default = "default_text_align")]
     pub align: TextAlign,
+    #[serde(default)]
+    pub field: Option<String>, // For data binding
 }
 
-#[derive(Debug, Clone)]
-pub struct TableSettings {
-    pub padding: f64,
-    pub border_width: f64,
-    pub header_height: f64,
-    pub cell_height: f64, // Min height
-    pub font_size: f64,   // Cell font size
+fn default_text_align() -> TextAlign {
+    TextAlign::Left
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableSettings {
+    #[serde(default = "default_padding")]
+    pub padding: f64,
+    #[serde(default = "default_border")]
+    pub border_width: f64,
+    #[serde(default = "default_header_height")]
+    pub header_height: f64,
+    #[serde(default = "default_cell_height")]
+    pub cell_height: f64,
+    #[serde(default = "default_font_size")]
+    pub font_size: f64,
+}
+
+fn default_padding() -> f64 { 5.0 }
+fn default_border() -> f64 { 1.0 }
+fn default_header_height() -> f64 { 30.0 }
+fn default_cell_height() -> f64 { 20.0 }
+fn default_font_size() -> f64 { 10.0 }
 
 impl Default for TableSettings {
     fn default() -> Self {
         TableSettings {
-            padding: 5.0,
-            border_width: 1.0,
-            header_height: 30.0,
-            cell_height: 20.0,
-            font_size: 10.0,
+            padding: default_padding(),
+            border_width: default_border(),
+            header_height: default_header_height(),
+            cell_height: default_cell_height(),
+            font_size: default_font_size(),
         }
     }
 }

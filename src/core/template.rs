@@ -40,6 +40,23 @@ pub enum TemplateNode {
         padding: Option<f64>,
         #[serde(default)]
         border: Option<f64>,
+    },
+    /// Table with columns and rows
+    Table {
+        columns: Vec<crate::core::table::TableColumn>,
+        #[serde(default)]
+        rows: Vec<Vec<String>>,
+        #[serde(default)]
+        settings: crate::core::table::TableSettings,
+        #[serde(default)]
+        data: Option<String>, // For data binding (array source)
+    },
+    /// Page number placeholder
+    PageNumber {
+        format: String,
+        size: f64,
+        #[serde(default)]
+        align: Option<String>,
     }
 }
 
@@ -55,27 +72,108 @@ impl Template {
     }
 
     pub fn to_layout_node(&self) -> std::sync::Arc<dyn crate::core::layout::LayoutNode> {
-        self.root.to_layout_node()
+        self.root.to_layout_node(&serde_json::Value::Null)
+    }
+
+    pub fn render(&self, data: &serde_json::Value) -> std::sync::Arc<dyn crate::core::layout::LayoutNode> {
+        self.root.to_layout_node(data)
     }
 }
 
-use crate::core::layout::{LayoutNode as CoreLayoutNode, Column, Row, TextNode, ImageNode, Container};
+use crate::core::layout::{LayoutNode as CoreLayoutNode, Column, Row, TextNode, ImageNode, Container, TableNode, PageNumberNode};
 use std::sync::Arc;
+use serde_json::Value;
+
+// Helper to resolve {{ variable.path }}
+fn resolve_template_string(text: &str, data: &Value) -> String {
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+    let mut i = 0;
+    
+    // We'll process by splitting on "{{". This is a naive implementation.
+    // A robust one would check for balanced braces.
+    // For v1.2, we assume valid syntax or simple nesting.
+    
+    let parts: Vec<&str> = text.split("{{").collect();
+    if parts.len() == 1 {
+        return text.to_string();
+    }
+
+    result.push_str(parts[0]);
+    
+    for part in &parts[1..] {
+        if let Some(end_idx) = part.find("}}") {
+            let var_name = part[..end_idx].trim();
+            let remainder = &part[end_idx+2..];
+            
+            // Resolve var_name
+            let value = resolve_json_path(var_name, data);
+            result.push_str(&value.unwrap_or_else(|| format!("{{{{ {} }}}}", var_name)));
+            result.push_str(remainder);
+        } else {
+            // Malformed? Just treat as text
+            result.push_str("{{");
+            result.push_str(part);
+        }
+    }
+    
+    result
+}
+
+fn resolve_json_path(path: &str, data: &Value) -> Option<String> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = data;
+    
+    for part in parts {
+        match current {
+            Value::Object(map) => {
+                if let Some(v) = map.get(part) {
+                    current = v;
+                } else {
+                    return None;
+                }
+            },
+            Value::Array(arr) => {
+                if let Ok(idx) = part.parse::<usize>() {
+                    if let Some(v) = arr.get(idx) {
+                        current = v;
+                    } else {
+                        return None;
+                    }
+                } else {
+                     return None;
+                }
+            },
+            _ => return None,
+        }
+    }
+    
+    match current {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        Value::Null => Some("".to_string()),
+        _ => Some(current.to_string()),
+    }
+}
 
 impl TemplateNode {
-    pub fn to_layout_node(&self) -> Arc<dyn CoreLayoutNode> {
+    pub fn to_layout_node(&self, data: &Value) -> Arc<dyn CoreLayoutNode> {
         match self {
             TemplateNode::Column { children, spacing } => {
-                let nodes: Vec<Arc<dyn CoreLayoutNode>> = children.iter().map(|c| c.to_layout_node()).collect();
+                let nodes: Vec<Arc<dyn CoreLayoutNode>> = children.iter().map(|c| c.to_layout_node(data)).collect();
                 Arc::new(Column { children: nodes, spacing: spacing.unwrap_or(0.0) })
             },
             TemplateNode::Row { children, spacing } => {
-                let nodes = children.iter().map(|c| c.to_layout_node()).collect();
+                let nodes = children.iter().map(|c| c.to_layout_node(data)).collect();
                 Arc::new(Row { children: nodes, spacing: spacing.unwrap_or(0.0) })
             },
             TemplateNode::Text { content, size, color, background_color, width: _ } => {
+                // Resolve content
+                let resolved = resolve_template_string(content, data);
+                
                 Arc::new(TextNode {
-                     text: content.clone(), 
+                     text: resolved, 
                      size: *size, 
                      color: *color, 
                      background_color: *background_color 
@@ -83,22 +181,109 @@ impl TemplateNode {
             },
             TemplateNode::Container { child, padding, border } => {
                  Arc::new(Container {
-                     child: child.to_layout_node(),
+                     child: child.to_layout_node(data),
                      padding: padding.unwrap_or(0.0),
                      border_width: border.unwrap_or(0.0),
                  })
             },
             TemplateNode::Image { src: _, width, height } => {
-                // Placeholder: Image loading needs document context. 
-                // For now, we return a placeholder or error?
-                // Or we assume image_index 0? 
-                // We'll use index 0 and warn.
                 Arc::new(ImageNode {
                     image_index: 0, 
                     width: *width, 
                     height: *height 
                 })
+            },
+            TemplateNode::Table { columns, rows, settings, data: data_path } => {
+                 let mut final_rows = Vec::new();
+
+                 // 1. If static rows exist, include them (with variable substitution!)
+                 for r in rows {
+                     let resolved_row: Vec<String> = r.iter()
+                         .map(|cell| resolve_template_string(cell, data))
+                         .collect();
+                     final_rows.push(resolved_row);
+                 }
+                 
+                 // 2. If data binding exists, fetch array and iterate
+                 if let Some(path_str) = data_path {
+                     // Check if path is "{{ var }}" or just "var"?
+                     // Implementation plan says "{{ items }}".
+                     // resolve_template_string handles that. 
+                     // But here we need the ARRAY OBJECT, not string.
+                     
+                     let clean_path = if path_str.starts_with("{{") && path_str.ends_with("}}") {
+                         path_str[2..path_str.len()-2].trim()
+                     } else {
+                         path_str.as_str()
+                     };
+
+                     // We need a helper that returns Value reference, not String
+                     if let Some(array_val) = get_value_by_path(clean_path, data) {
+                         if let Value::Array(arr) = array_val {
+                             for item in arr {
+                                 let mut row_vec = Vec::new();
+                                 for col in columns {
+                                     // Column should have `field`. 
+                                     // If field is present, lookup in item.
+                                     // If field missing, empty?
+                                     
+                                     if let Some(field) = &col.field {
+                                          let val = resolve_json_path(field, item).unwrap_or_default();
+                                          row_vec.push(val);
+                                     } else {
+                                          row_vec.push("".to_string());
+                                     }
+                                 }
+                                 final_rows.push(row_vec);
+                             }
+                         }
+                     }
+                 }
+
+                let table = crate::core::table::Table {
+                    columns: columns.clone(),
+                    rows: final_rows,
+                    settings: settings.clone(),
+                };
+                Arc::new(TableNode { table })
+            },
+            TemplateNode::PageNumber { format, size, align } => {
+                Arc::new(PageNumberNode {
+                    format: format.clone(),
+                    size: *size,
+                    align: align.clone().unwrap_or_else(|| "left".to_string()),
+                })
             }
         }
     }
+}
+
+fn get_value_by_path<'a>(path: &str, data: &'a Value) -> Option<&'a Value> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = data;
+    
+    for part in parts {
+        match current {
+            Value::Object(map) => {
+                if let Some(v) = map.get(part) {
+                    current = v;
+                } else {
+                    return None;
+                }
+            },
+            Value::Array(arr) => {
+                if let Ok(idx) = part.parse::<usize>() {
+                    if let Some(v) = arr.get(idx) {
+                        current = v;
+                    } else {
+                        return None;
+                    }
+                } else {
+                     return None;
+                }
+            },
+            _ => return None,
+        }
+    }
+    Some(current)
 }
