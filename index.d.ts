@@ -22,7 +22,7 @@ export interface Color {
   a?: number
 }
 /** Template for repeating headers and footers */
-export interface Template {
+export interface FlowOptions {
   marginTop?: number
   marginBottom?: number
 }
@@ -30,6 +30,7 @@ export interface TableColumn {
   header: string
   width: number
   align?: string
+  field?: string
 }
 /** Represents a loaded font with parsing and shaping capabilities */
 export declare class Font {
@@ -46,12 +47,25 @@ export declare class Font {
 export declare class Image {
   /** Load an image from a file path */
   static fromFile(path: string): Image
+  /** Load an image from bytes */
+  static fromBytes(data: Array<number>): Image
 }
 /** Data Table with headers and rows */
 export declare class Table {
   constructor(columns: Array<TableColumn>)
   addRow(row: Array<string>): void
   setFontSize(size: number): void
+}
+/** Template loaded from JSON */
+export declare class Template {
+  /** Load template from JSON string */
+  static fromJson(json: string): Template
+  /** Load template from .pdfCoret (zip) file */
+  static fromZip(path: string): Template
+  /** Convert template to a LayoutNode for rendering */
+  toLayout(dataJson?: string | undefined | null): LayoutNode
+  /** Alias for to_layout with data */
+  render(dataJson: string): LayoutNode
 }
 /** Opaque wrapper for a Layout Node */
 export declare class LayoutNode {
@@ -112,6 +126,11 @@ export declare class Document {
   finalize(): void
   /** Write the document to a file (buffered mode) */
   writeTo(path: string): void
+  /**
+   * Register assets from a loaded Template into this Document
+   * This is required if the template contains images.
+   */
+  registerTemplateAssets(template: Template): void
   /** Automatically paginate a layout tree across multiple pages */
-  renderFlow(node: LayoutNode, width: number, height: number, font: Font, fontIndex: number, header?: LayoutNode | undefined | null, footer?: LayoutNode | undefined | null, template?: Template | undefined | null): void
+  renderFlow(node: LayoutNode, width: number, height: number, font: Font, fontIndex: number, header?: LayoutNode | undefined | null, footer?: LayoutNode | undefined | null, options?: FlowOptions | undefined | null): void
 }

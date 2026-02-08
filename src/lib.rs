@@ -108,7 +108,7 @@ pub struct Color {
 /// Template for repeating headers and footers
 #[napi(object)]
 #[derive(Clone)]
-pub struct PageTemplate {
+pub struct FlowOptions {
     pub margin_top: Option<f64>,
     pub margin_bottom: Option<f64>,
 }
@@ -387,17 +387,11 @@ impl Page {
         x: f64, 
         y: f64, 
         width: f64, 
-        font: &Font, 
+        font: &Font,
         font_index: u32,
         current_page: Option<u32>,
-        total_pages: Option<u32>
-    ) {
-        // Create constraints based on width (and infinite height for now?)
-        // y in PDF is bottom-up, but layout engine might assume top-down relative to cached pos.
-        // Our layout engine `render` takes a Rect.
-        // We'll give it the bounding box.
-        
-        // Construct page context
+        total_pages: Option<u32>,
+    ) -> Result<()> {
         let context = if let (Some(c), Some(t)) = (current_page, total_pages) {
             crate::core::layout::PageContext {
                 current: c as usize,
@@ -422,7 +416,7 @@ impl Page {
         };
         
         node.inner.render(&mut self.inner, area, &font.inner, font_index, &context);
-        
+        Ok(())
     }
 }
 
@@ -529,12 +523,12 @@ impl Document {
         font_index: u32,
         header: Option<&LayoutNode>,
         footer: Option<&LayoutNode>,
-        template: Option<PageTemplate>
+        options: Option<FlowOptions>
     ) -> Result<()> {
         let header_node = header.map(|h| h.inner.clone());
         let footer_node = footer.map(|f| f.inner.clone());
-        let margin_top = template.as_ref().and_then(|t| t.margin_top).unwrap_or(0.0);
-        let margin_bottom = template.as_ref().and_then(|t| t.margin_bottom).unwrap_or(0.0);
+        let margin_top = options.as_ref().and_then(|t| t.margin_top).unwrap_or(0.0);
+        let margin_bottom = options.as_ref().and_then(|t| t.margin_bottom).unwrap_or(0.0);
 
         // Pre-calculate fixed reserved space
         let constraints = CoreConstraints::loose(width, f64::INFINITY);
@@ -624,4 +618,5 @@ impl Document {
     }
 }
 
-// ... rest of file
+// Force rebuild
+
