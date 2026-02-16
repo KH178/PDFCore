@@ -1,4 +1,4 @@
-Understood. Here is a clean, neutral, minimal README without attitude and without using double hyphens.
+Here is the updated minimal README with proper data streaming example added and aligned with your spec.
 
 ---
 
@@ -19,7 +19,8 @@ PDFCore is an engine, not a browser wrapper.
 * Page-level parallel rendering
 * Bounded memory usage
 * Custom `.pdfCoret` template format
-* SQLite streaming data binding
+* SQLite cursor-based data streaming
+* Batch data stream rendering
 * Asset deduplication
 * Multi-page document support
 * CLI and JavaScript SDK
@@ -62,10 +63,52 @@ await client.render({
 
 ---
 
+## Streaming Data Example
+
+PDFCore can render large datasets without loading them fully into memory.
+
+```js
+const fs = require("fs");
+const { Readable } = require("stream");
+const { PDFCoreClient } = require("@pdfcore/client");
+
+const readable = new Readable({
+  read() {}
+});
+
+for (let i = 0; i < 1000; i++) {
+  readable.push(JSON.stringify({ counter: i }) + "\n");
+}
+readable.push(null);
+
+const client = new PDFCoreClient();
+
+await client.renderBatch({
+  template: "stream_template.pdfCoret",
+  dataStream: readable,
+  output: "stream_output.pdf"
+});
+```
+
+This ensures:
+
+* Incremental row processing
+* Constant memory usage
+* Page-level buffering only
+* Deterministic output
+
+---
+
 ## CLI Example
 
 ```bash
 pdfcore render invoice.pdfCoret --data data.json --out invoice.pdf
+```
+
+Streaming from SQLite:
+
+```bash
+pdfcore render report.pdfCoret --db ./data.db --param 101 --out report.pdf
 ```
 
 ---
