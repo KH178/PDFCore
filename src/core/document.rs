@@ -3,7 +3,7 @@ use std::io::{self, Error, ErrorKind, Write};
 use crate::core::font::Font;
 use crate::core::page::Page;
 use crate::core::image::Image;
-use crate::core::writer::{PdfWriter, PdfObject};
+use crate::core::writer::{PdfWriter, PdfObject, WriteSeek};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
@@ -46,7 +46,7 @@ impl Document {
     /// Create a new document in streaming mode
     /// Pages are written immediately as they're added
     pub fn streaming(path: &str) -> io::Result<Self> {
-        let mut writer = PdfWriter::new(path)?;
+        let mut writer = PdfWriter::from_path(path)?;
         
         let catalog_id = 1;
         let pages_id = 2;
@@ -239,12 +239,18 @@ impl Document {
     
     /// Write the document to a file (buffered mode)
     pub fn write_to(&self, path: &str) -> io::Result<()> {
+        let file = std::fs::File::create(path)?;
+        self.write_to_writer(file)
+    }
+
+    /// Write usage generic writer (Buffered mode)
+    pub fn write_to_writer<W: crate::core::writer::WriteSeek>(&self, w: W) -> io::Result<()> {
         match &self.mode {
             DocumentMode::Streaming { .. } => {
                 Err(Error::new(ErrorKind::Other, "write_to() is only for buffered mode. Use finalize() for streaming mode."))
             }
             DocumentMode::Buffered(pages) => {
-                let mut writer = PdfWriter::new(path)?;
+                let mut writer = PdfWriter::new(w)?;
                 
                 let catalog_id = 1;
                 let pages_id = 2;
@@ -393,7 +399,7 @@ fn subset_font(font: &Font, used_gids: &HashSet<u16>) -> Vec<u8> {
 }
 
 /// Embed a custom TrueType font into PDF
-fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gids: Option<&HashSet<u16>>) -> io::Result<u32> {
+fn embed_custom_font<W: WriteSeek>(writer: &mut PdfWriter<W>, font: &Font, base_id: u32, used_gids: Option<&HashSet<u16>>) -> io::Result<u32> {
     let font_file_id = base_id;
     let font_descriptor_id = base_id + 1;
     let cid_font_id = base_id + 2;
@@ -528,7 +534,7 @@ fn embed_custom_font(writer: &mut PdfWriter, font: &Font, base_id: u32, used_gid
 }
 
 /// Embed an image into the PDF
-fn embed_image(writer: &mut PdfWriter, image: &Image, object_id: u32) -> io::Result<()> {
+fn embed_image<W: WriteSeek>(writer: &mut PdfWriter<W>, image: &Image, object_id: u32) -> io::Result<()> {
     // If filter is explicitly set (e.g. DCTDecode for JPEG), use raw data
     // If filter is None or FlateDecode was requested (for PNG), compress data
     

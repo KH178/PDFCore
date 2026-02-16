@@ -602,3 +602,52 @@ impl LayoutNode for PageNumberNode {
     }
 }
 
+
+// Canvas implementation for absolute positioning
+#[derive(Clone)]
+pub struct Canvas {
+    pub children: Vec<(Arc<dyn LayoutNode>, f64, f64)>, // Node, x, y
+    pub width: f64,
+    pub height: f64,
+}
+
+impl LayoutNode for Canvas {
+    fn measure(&self, constraints: Constraints, _: &Font) -> Size {
+        Size {
+            width: if self.width > 0.0 { self.width } else { constraints.max_width },
+            height: if self.height > 0.0 { self.height } else { constraints.max_height },
+        }
+    }
+
+    fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
+        for (child, x, y) in &self.children {
+            // Measure child to know its size
+            let size = child.measure(Constraints::loose(f64::INFINITY, f64::INFINITY), font);
+            
+            // Calculate absolute position
+            // area.x/y is the TOP-LEFT origin for the Canvas.
+            // In our layout engine, 'y' passed to render is the TOP coordinate.
+            // Child 'y' is distance from TOP.
+            // So draw at area.y - y.
+            
+            let child_area = Rect {
+                x: area.x + x,
+                y: area.y - y,
+                width: size.width,
+                height: size.height,
+            };
+            
+            child.render(page, child_area, font, font_index, context);
+        }
+    }
+
+    fn split(&self, _: f64, available_height: f64, _: &Font) -> SplitAction {
+        // Canvas does not split. It's a single block.
+        let h = if self.height > 0.0 { self.height } else { 0.0 };
+        if h <= available_height {
+            SplitAction::Fit
+        } else {
+            SplitAction::Push
+        }
+    }
+}

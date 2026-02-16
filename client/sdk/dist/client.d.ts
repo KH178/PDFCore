@@ -7,4 +7,5 @@ export interface RenderOptions {
 export declare class PDFCoreClient {
     constructor();
     render(options: RenderOptions): Promise<void>;
+    renderBatch(templatePath: string, dataStream: NodeJS.ReadableStream, outputPath: string): Promise<void>;
 }

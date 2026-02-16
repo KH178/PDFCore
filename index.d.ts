@@ -25,12 +25,25 @@ export interface Color {
 export interface FlowOptions {
   marginTop?: number
   marginBottom?: number
+  marginLeft?: number
+  marginRight?: number
 }
 export interface TableColumn {
   header: string
   width: number
   align?: string
   field?: string
+}
+export interface JsMargins {
+  top: number
+  bottom: number
+  left: number
+  right: number
+}
+export interface JsTemplateSettings {
+  size?: string
+  orientation?: string
+  margins?: JsMargins
 }
 /** Represents a loaded font with parsing and shaping capabilities */
 export declare class Font {
@@ -66,6 +79,7 @@ export declare class Template {
   toLayout(dataJson?: string | undefined | null): LayoutNode
   /** Alias for to_layout with data */
   render(dataJson: string): LayoutNode
+  getSettings(): JsTemplateSettings
 }
 /** Opaque wrapper for a Layout Node */
 export declare class LayoutNode {

@@ -23,6 +23,8 @@ pub struct Style {
     pub border: Option<f64>,
     pub header_height: Option<f64>,
     pub cell_height: Option<f64>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -99,7 +101,32 @@ pub enum TemplateNode {
         align: Option<String>,
         #[serde(default)]
         style: Option<String>,
+    },
+    /// Fixed layout container for absolute positioning
+    Canvas {
+        children: Vec<TemplateNode>,
+        #[serde(default)]
+        width: Option<f64>,
+        #[serde(default)]
+        height: Option<f64>,
+        #[serde(default)]
+        style: Option<String>,
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct Margins {
+    pub top: f64,
+    pub bottom: f64,
+    pub left: f64,
+    pub right: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct TemplateSettings {
+    pub size: Option<String>,
+    pub orientation: Option<String>,
+    pub margins: Option<Margins>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -107,6 +134,8 @@ pub struct Template {
     pub root: TemplateNode,
     #[serde(default)]
     pub manifest: Option<Manifest>,
+    #[serde(default)]
+    pub settings: Option<TemplateSettings>,
     #[serde(default)]
     pub styles: HashMap<String, Style>,
     #[serde(skip)]
@@ -118,6 +147,7 @@ pub struct Template {
 impl Template {
     pub fn from_json(json: &str) -> serde_json::Result<Self> {
         let mut t: Template = serde_json::from_str(json)?;
+        t.validate_version().map_err(|e| serde::de::Error::custom(e))?;
         t.assets = HashMap::new();
         t.asset_indices = HashMap::new();
         Ok(t)
@@ -125,7 +155,11 @@ impl Template {
 
     pub fn from_zip(path: &str) -> Result<Self, String> {
         let file = std::fs::File::open(path).map_err(|e| format!("Failed to open zip file '{}': {}", path, e))?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read zip archive: {}", e))?;
+        Self::from_zip_reader(file)
+    }
+
+    pub fn from_zip_reader<R: std::io::Read + std::io::Seek>(reader: R) -> Result<Self, String> {
+        let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("Failed to read zip archive: {}", e))?;
         
         // 1. Read layout.json
         let mut layout_file = archive.by_name("layout.json").map_err(|_| "layout.json not found in archive (check if zip root is correct)".to_string())?;
@@ -134,8 +168,6 @@ impl Template {
         drop(layout_file);
         
         let mut template: Template = serde_json::from_str(&json).map_err(|e| format!("Failed to parse layout.json: {}", e))?;
-        template.assets = HashMap::new();
-        template.asset_indices = HashMap::new();
         
         // 2. Read styles.json (optional)
         if let Ok(mut style_file) = archive.by_name("styles.json") {
@@ -147,7 +179,7 @@ impl Template {
             }
         }
 
-        // 3. Read manifest.json (optional)
+        // 3. Read manifest.json (optional but recommended for versioning)
         if let Ok(mut manifest_file) = archive.by_name("manifest.json") {
             let mut manifest_json = String::new();
             if std::io::Read::read_to_string(&mut manifest_file, &mut manifest_json).is_ok() {
@@ -156,6 +188,12 @@ impl Template {
                 }
             }
         }
+        
+        // Validate Version AFTER loading manifest
+        template.validate_version()?;
+        
+        template.assets = HashMap::new();
+        template.asset_indices = HashMap::new();
         
         // 4. Read all other files as assets
         for i in 0..archive.len() {
@@ -170,6 +208,24 @@ impl Template {
         }
         
         Ok(template)
+    }
+
+    fn validate_version(&self) -> Result<(), String> {
+        const CURRENT_ENGINE_VERSION: &str = "1.2";
+        
+        if let Some(manifest) = &self.manifest {
+            if let Some(version) = &manifest.version {
+                // Simple string comparison for now, strict semver later if needed
+                // Assuming version format "Maj.Min"
+                if version.as_str() > CURRENT_ENGINE_VERSION {
+                    return Err(format!(
+                        "Template version {} is newer than supported engine version {}. Please upgrade the engine.",
+                        version, CURRENT_ENGINE_VERSION
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn to_layout_node(&self) -> std::sync::Arc<dyn crate::core::layout::LayoutNode> {
@@ -375,6 +431,39 @@ impl TemplateNode {
                     format: format.clone(),
                     size: size_val,
                     align: align_val,
+                })
+            },
+            TemplateNode::Canvas { children, width, height, style } => {
+                let w_val = resolve_prop(*width, style.as_ref(), styles, |s| s.width, 0.0);
+                let h_val = resolve_prop(*height, style.as_ref(), styles, |s| s.height, 0.0);
+                
+                let mut positioned_children = Vec::new();
+                for child in children {
+                    let node = child.to_layout_node(data, asset_indices, styles);
+                    
+                    // Helper to get style from TemplateNode
+                    let (x, y) = match child {
+                        TemplateNode::Text { style, .. } |
+                        TemplateNode::Image { style, .. } |
+                        TemplateNode::Container { style, .. } |
+                        TemplateNode::Column { style, .. } |
+                        TemplateNode::Row { style, .. } |
+                        TemplateNode::Table { style, .. } |
+                        TemplateNode::PageNumber { style, .. } |
+                        TemplateNode::Canvas { style, .. } => {
+                             let x = resolve_prop(None, style.as_ref(), styles, |s| s.x, 0.0);
+                             let y = resolve_prop(None, style.as_ref(), styles, |s| s.y, 0.0);
+                             (x, y)
+                        }
+                    };
+                    
+                    positioned_children.push((node, x, y));
+                }
+
+                Arc::new(crate::core::layout::Canvas { 
+                    children: positioned_children,
+                    width: w_val,
+                    height: h_val
                 })
             }
         }

@@ -62,16 +62,18 @@ pub fn escape_string(s: &str) -> String {
     s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 }
 
-pub struct PdfWriter {
-    writer: BufWriter<File>,
+pub trait WriteSeek: Write + Seek {}
+impl<T: Write + Seek> WriteSeek for T {}
+
+pub struct PdfWriter<W: WriteSeek = Box<dyn WriteSeek>> {
+    writer: BufWriter<W>,
     offset: u64,
     pub(crate) xref: Vec<(u32, u64)>, // id -> offset
 }
 
-impl PdfWriter {
-    pub fn new(path: &str) -> io::Result<Self> {
-        let file = File::create(path)?;
-        let mut writer = BufWriter::with_capacity(64 * 1024, file); // 64KB buffer
+impl<W: WriteSeek> PdfWriter<W> {
+    pub fn new(writer: W) -> io::Result<Self> {
+        let mut writer = BufWriter::with_capacity(64 * 1024, writer); // 64KB buffer
         
         // Write Header
         let header = b"%PDF-1.7\n%\x93\x8C\x8B\x9E\n"; // Binary comment to indicate binary file
@@ -83,6 +85,17 @@ impl PdfWriter {
             xref: Vec::new(),
         })
     }
+
+}
+
+impl PdfWriter<Box<dyn WriteSeek>> {
+    pub fn from_path(path: &str) -> io::Result<Self> {
+        let file = File::create(path)?;
+        Self::new(Box::new(file))
+    }
+}
+
+impl<W: WriteSeek> PdfWriter<W> {
 
 
     pub fn write_object(&mut self, id: u32, object: &PdfObject) -> io::Result<()> {
@@ -107,7 +120,7 @@ impl PdfWriter {
        // For now, we need exact positions, so flush
        // TODO: Optimize by batching writes
        self.writer.flush()?;
-       self.offset = self.writer.get_ref().stream_position()?;
+       self.offset = self.writer.stream_position()?;
        
        Ok(())
     }

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>PDFCore WASM Test</title>
+</head>
+<body>
+    <h1>PDFCore WASM Test</h1>
+    <button id="renderBtn">Render PDF</button>
+    <div id="status">Loading...</div>
+    
+    <script type="module">
+        // Cache busting requires dynamic import or bundler, reverting to static for simple test
+        import init, { WasmTemplate, WasmDocument, WasmPage, WasmFont } from './pkg/ai_pdf_writer.js';
+
+        async function run() {
+            await init();
+            document.getElementById('status').innerText = "WASM Loaded. Ready.";
+            
+            document.getElementById('renderBtn').onclick = async () => {
+                try {
+                    const status = document.getElementById('status');
+                    status.innerText = "Rendering...";
+                    
+                    // Create dummy template
+                    const templateJson = JSON.stringify({
+                        root: { type: "Text", content: "Hello from WASM!", size: 50.0 },
+                        manifest: { version: "1.0" }
+                    });
+                    
+                    // console.log("Template JSON:", templateJson);
+
+                    // Load Font
+                    // We need a font file. For now, let's try to fetch one.
+                    // If no local file, we can't run text layout?
+                    // Let's assume we have 'assets/Roboto-Regular.ttf' served by http-server
+                    // Note: python http.server serves current dir. 
+                    // We need a 'assets' folder in root or just 'Roboto-Regular.ttf'
+                    
+                    console.log("Fetching font...");
+                    // Reverted to local file since CDN failed
+                    const fontRes = await fetch('Roboto-Regular.ttf');
+                    if (!fontRes.ok) throw new Error("Failed to fetch font ('Roboto-Regular.ttf' missing)");
+                    const fontBuffer = await fontRes.arrayBuffer();
+                    const fontBytes = new Uint8Array(fontBuffer);
+                    
+                    const font = WasmFont.from_bytes(fontBytes, "Roboto");
+                    console.log("Font loaded");
+
+                    const template = WasmTemplate.from_json(templateJson);
+                    // Pass font to layout? Wait, Template.render just creates the tree?
+                    // CoreTemplate::render takes NO font. It just builds the tree.
+                    // LayoutNode::measure takes Font.
+                    // But WasmLayoutNode wraps the tree.
+                    // We don't measure here. We measure when rendering?
+                    // No, usually layout is 2-phase: Measure/Arrangement -> Render.
+                    // But CoreLayoutNode has measure() and render().
+                    // Our current WasmPage::render_layout calls node.render().
+                    // Inside node.render for Container/Column, it calls measure().
+                    // So we need Font to measure.
+                    
+                    const layout = template.render("{}");
+                    
+                    // Create document
+                    const doc = new WasmDocument();
+                    const page = new WasmPage(595.0, 842.0); // A4
+                    
+                    // Register font with document (for getting Font Index /F2)
+                    const fontIndex = doc.add_font(font);
+                    console.log("Font registered, index:", fontIndex);
+                    
+                    // Render layout to page
+                    page.render_layout(layout, font, fontIndex);
+                    doc.add_page(page);
+                    
+                    const pdfBytes = doc.save();
+                    
+                    // Create Blob and download
+                    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = 'test_wasm.pdf';
+                    link.click();
+                    
+                    status.innerText = `Success! PDF size: ${pdfBytes.length} bytes`;
+                } catch (e) {
+                    console.error(e);
+                    document.getElementById('status').innerText = "Error: " + e;
+                }
+            };
+        }
+        
+        run();
+    </script>
+</body>
+</html>
