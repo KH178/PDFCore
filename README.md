@@ -100,15 +100,18 @@ This ensures:
 ---
 
 ## CLI Example
-
 ```bash
-pdfcore render invoice.pdfCoret --data data.json --out invoice.pdf
-```
+# Render a template with data
+pdfcore render invoice.pdfCoret --data data.json --output invoice.pdf
 
-Streaming from SQLite:
+# Render from NDJSON stream (Standard Input)
+cat data.ndjson | pdfcore render invoice.pdfCoret --stream --output invoice.pdf
 
-```bash
-pdfcore render report.pdfCoret --db ./data.db --param 101 --out report.pdf
+# Pack a template directory
+pdfcore pack ./my-template-dir --output template.pdfCoret
+
+# Validate a template structure
+pdfcore validate ./my-template-dir
 ```
 
 ---

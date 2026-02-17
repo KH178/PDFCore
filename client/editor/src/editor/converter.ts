@@ -145,7 +145,7 @@ function componentToNode(comp: Component): TemplateNode | null {
         type: 'Table',
         columns: Array.from(el.querySelectorAll('thead th')).map((th: any) => ({
           header: th.textContent || '',
-          width: th.getBoundingClientRect().width || 100,
+          width: (th.style.width && parseInt(th.style.width)) || th.getBoundingClientRect().width || 100,
         })),
         rows: Array.from(el.querySelectorAll('tbody tr')).map((tr: any) =>
           Array.from(tr.querySelectorAll('td')).map((td: any) => td.textContent || '')
@@ -312,7 +312,10 @@ function nodeToHtml(node: TemplateNode, assets: Map<string, string>): string {
       const striped = st.striped !== false;
       const thS = `border:1px solid ${bC};padding:${cP}px;background:${hBg};color:${hC};font-weight:600;text-align:left;font-size:${fS}px;`;
       const tdS = (ri: number) => `border:1px solid ${bC};padding:${cP}px;font-size:${fS}px;${striped && ri % 2 === 1 ? 'background:#f8fafc;' : ''}`;
-      const ths = cols.map((c: any) => `<th style="${thS}">${esc(c.header)}</th>`).join('');
+      const ths = cols.map((c: any) => {
+        const wS = c.width ? `width:${c.width}px;` : '';
+        return `<th style="${thS}${wS}">${esc(c.header)}</th>`;
+      }).join('');
       const trs = rows.map((r: string[], ri: number) => `<tr>${r.map(cell => `<td style="${tdS(ri)}">${esc(cell)}</td>`).join('')}</tr>`).join('');
       return `<table data-pdf-type="Table" data-header-bg="${hBg}" data-header-color="${hC}" data-border-color="${bC}" data-cell-padding="${cP}" data-font-size="${fS}" data-striped="${striped}" style="width:100%;border-collapse:collapse;font-size:${fS}px;table-layout:fixed;"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
     }

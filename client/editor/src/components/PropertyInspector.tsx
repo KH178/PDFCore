@@ -90,7 +90,7 @@ export default function PropertyInspector({ editor }: PropertyInspectorProps) {
     refresh(comp);
   };
 
-  const { pdfType, style, attrs } = state;
+  const { pdfType, style, attrs, comp } = state;
 
   // ═══ No selection ═══
   if (!pdfType) {
@@ -194,6 +194,27 @@ export default function PropertyInspector({ editor }: PropertyInspectorProps) {
               </Row>
             </Section>
           </>
+        )}
+
+        {/* ═══ HYPERLINK SPECIAL ═══ */}
+        {isHyperlink && (
+          <Section label="Link">
+            <Row>
+              <TextInput label="URL" value={attrs['href'] || '#'} onChange={(v) => setAttr('href', v)} />
+            </Row>
+            <Row>
+              <TextInput label="Text" value={comp.components().models[0]?.get('content') || ''} onChange={(v) => comp.components(v)} />
+            </Row>
+          </Section>
+        )}
+
+        {/* ═══ DYNAMIC TEXT SPECIAL ═══ */}
+        {isDynamicText && (
+          <Section label="Data Binding">
+            <Row>
+              <TextInput label="Field" value={attrs['data-binding'] || ''} onChange={(v) => { setAttr('data-binding', v); comp.components(`{{${v}}}`); }} />
+            </Row>
+          </Section>
         )}
 
         {/* ═══ IMAGE ═══ */}
@@ -366,14 +387,28 @@ function TableColumnWidths({ comp, onChanged }: { comp: any; onChanged: () => vo
   });
 
   const setColWidth = (colIdx: number, width: number) => {
-    headers[colIdx].style.width = width + 'px';
-    // Sync HTML back to GrapesJS model
-    const html = el.outerHTML;
-    const parent = comp.parent();
-    const idx = parent.components().indexOf(comp);
-    comp.remove();
-    parent.components().add(html, { at: idx });
-    onChanged();
+    // Traverse GrapesJS model: Table -> thead -> tr -> th
+    const thead = comp.components().models.find((c: any) => c.get('tagName') === 'thead');
+    if (!thead) { console.warn('TableColumnWidths: No thead found'); return; }
+    const tr = thead.components().models.find((c: any) => c.get('tagName') === 'tr');
+    if (!tr) { console.warn('TableColumnWidths: No tr header found'); return; }
+    const ths = tr.components().models;
+    const th = ths[colIdx];
+    
+    if (th) {
+      console.log(`Setting col ${colIdx} width to ${width}`);
+      if (width > 0) th.addStyle({ width: `${width}px` });
+      else {
+        // Remove width by setting empty string or reverting to auto
+        const style = { ...th.getStyle() };
+        delete style.width;
+        th.setStyle(style);
+      }
+      // Force refresh to update the inputs
+      onChanged();
+    } else {
+      console.warn(`TableColumnWidths: No th found at index ${colIdx}`);
+    }
   };
 
   return (
@@ -399,6 +434,8 @@ function Divider() {
   return <div className="border-t border-gray-700/50 my-1" />;
 }
 
+const stopKeys = (e: React.KeyboardEvent) => e.stopPropagation();
+
 function NumInput({ label, value, unit, step, onChange }: {
   label: string; value: number; unit: string; step?: number; onChange: (v: number) => void;
 }) {
@@ -410,6 +447,8 @@ function NumInput({ label, value, unit, step, onChange }: {
         step={step || 1}
         value={Math.round(value * 100) / 100 || ''}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        onKeyDown={stopKeys}
+        onKeyUp={stopKeys}
         className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-gray-200 text-[11px] focus:border-indigo-500 focus:outline-none w-12"
       />
       {unit && <span className="text-gray-600 text-[10px] w-4 flex-shrink-0">{unit}</span>}
@@ -421,13 +460,24 @@ function ColorInput({ label, value, onChange }: { label: string; value: string; 
   return (
     <div className="flex items-center gap-1 flex-1 min-w-0">
       <span className="text-gray-500 text-[10px] w-10 flex-shrink-0 truncate">{label}</span>
-      <input
-        type="color"
-        value={safeHex(value)}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-6 h-5 border border-gray-600 rounded cursor-pointer bg-transparent flex-shrink-0"
-      />
-      <span className="text-gray-600 text-[10px] truncate flex-1">{value === 'transparent' ? 'none' : value}</span>
+      <div className="flex items-center gap-1 flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5">
+        <input
+          type="color"
+          value={safeHex(value)}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={stopKeys}
+          onKeyUp={stopKeys}
+          className="w-4 h-4 rounded border-none p-0 bg-transparent cursor-pointer"
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={stopKeys}
+          onKeyUp={stopKeys}
+          className="flex-1 min-w-0 bg-transparent text-gray-200 text-[11px] focus:outline-none"
+        />
+      </div>
     </div>
   );
 }
@@ -441,10 +491,28 @@ function SelectInput({ label, value, options, onChange }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={stopKeys}
+        onKeyUp={stopKeys}
         className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-gray-200 text-[11px] focus:border-indigo-500 focus:outline-none cursor-pointer"
       >
         {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
+    </div>
+  );
+}
+
+function TextInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-1 flex-1 min-w-0">
+      <span className="text-gray-500 text-[10px] w-10 flex-shrink-0 truncate">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={stopKeys}
+        onKeyUp={stopKeys}
+        className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-gray-200 text-[11px] focus:border-indigo-500 focus:outline-none"
+      />
     </div>
   );
 }

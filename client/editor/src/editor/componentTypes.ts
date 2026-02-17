@@ -348,75 +348,94 @@ export function registerEditorCommands(editor: Editor) {
   cmds.add('table-add-col', {
     run(ed: any) {
       const sel = ed.getSelected();
-      const el = sel?.view?.el;
-      if (!el || el.tagName !== 'TABLE') return;
-      el.querySelectorAll('tr').forEach((tr: HTMLElement) => {
-        const isHeader = tr.parentElement?.tagName === 'THEAD';
-        const cell = document.createElement(isHeader ? 'th' : 'td');
-        cell.textContent = isHeader ? `Col ${tr.children.length + 1}` : 'Data';
-        tr.appendChild(cell);
-      });
-      restyleAndSync(sel, el, ed);
+      if (!sel || sel.getAttributes()['data-pdf-type'] !== 'Table') return;
+      
+      const thead = sel.components().models.find((c: any) => c.get('tagName') === 'thead');
+      const tbody = sel.components().models.find((c: any) => c.get('tagName') === 'tbody');
+      
+      if (thead) {
+        thead.components().each((tr: any) => {
+          const colIdx = tr.components().length + 1;
+          tr.components().add(`<th>Col ${colIdx}</th>`);
+        });
+      }
+      
+      if (tbody) {
+        tbody.components().each((tr: any) => {
+          tr.components().add(`<td>Data</td>`);
+        });
+      }
+      restyleTable(sel); // Updates styles on new cells
     },
   });
 
   cmds.add('table-remove-col', {
     run(ed: any) {
       const sel = ed.getSelected();
-      const el = sel?.view?.el;
-      if (!el || el.tagName !== 'TABLE') return;
+      if (!sel || sel.getAttributes()['data-pdf-type'] !== 'Table') return;
+
+      const thead = sel.components().models.find((c: any) => c.get('tagName') === 'thead');
+      const tbody = sel.components().models.find((c: any) => c.get('tagName') === 'tbody');
+      
       let removed = false;
-      el.querySelectorAll('tr').forEach((tr: HTMLElement) => {
-        if (tr.children.length > 1) { tr.removeChild(tr.lastElementChild!); removed = true; }
-      });
-      if (removed) restyleAndSync(sel, el, ed);
+      if (thead) {
+        thead.components().each((tr: any) => {
+          const last = tr.components().last();
+          if (last && tr.components().length > 1) { last.remove(); removed = true; }
+        });
+      }
+      
+      if (tbody) {
+        tbody.components().each((tr: any) => {
+          const last = tr.components().last();
+          if (last && tr.components().length > 1) { last.remove(); }
+        });
+      }
+      if (removed) restyleTable(sel);
     },
   });
 
   cmds.add('table-add-row', {
     run(ed: any) {
       const sel = ed.getSelected();
-      const el = sel?.view?.el;
-      if (!el || el.tagName !== 'TABLE') return;
-      const tbody = el.querySelector('tbody');
+      if (!sel || sel.getAttributes()['data-pdf-type'] !== 'Table') return;
+      
+      const tbody = sel.components().models.find((c: any) => c.get('tagName') === 'tbody');
       if (!tbody) return;
-      const firstRow = tbody.querySelector('tr');
-      const colCount = firstRow ? firstRow.children.length : 3;
-      const tr = document.createElement('tr');
-      for (let i = 0; i < colCount; i++) {
-        const td = document.createElement('td');
-        td.textContent = 'Data';
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-      restyleAndSync(sel, el, ed);
+      
+      const firstRow = tbody.components().models[0];
+      const colCount = firstRow ? firstRow.components().length : 3;
+      
+      const tds = Array(colCount).fill('<td>Data</td>').join('');
+      tbody.components().add(`<tr>${tds}</tr>`);
+      
+      restyleTable(sel);
     },
   });
 
   cmds.add('table-remove-row', {
     run(ed: any) {
       const sel = ed.getSelected();
-      const el = sel?.view?.el;
-      if (!el || el.tagName !== 'TABLE') return;
-      const tbody = el.querySelector('tbody');
+      if (!sel || sel.getAttributes()['data-pdf-type'] !== 'Table') return;
+
+      const tbody = sel.components().models.find((c: any) => c.get('tagName') === 'tbody');
       if (!tbody) return;
-      const rows = tbody.querySelectorAll('tr');
+      
+      const rows = tbody.components();
       if (rows.length > 1) {
-        tbody.removeChild(rows[rows.length - 1]);
-        restyleAndSync(sel, el, ed);
+        rows.at(rows.length - 1).remove();
+        restyleTable(sel);
       }
     },
   });
 }
 
 /**
- * Re-apply all cell styles uniformly, then sync HTML back to GrapesJS.
- * This ensures consistent styling after ANY add/remove operation:
- * - Header cells: correct bg, color, font-weight
- * - Body cells: correct border, padding, font-size, striped backgrounds
+ * Re-apply table styles using GrapesJS Models (Non-Destructive).
+ * Ensures styles are consistent after row/col operations without destroying the component.
  */
-function restyleAndSync(sel: any, el: HTMLElement, ed: any) {
-  const attrs = sel.getAttributes();
+function restyleTable(tableComp: any) {
+  const attrs = tableComp.getAttributes();
   const borderColor = attrs['data-border-color'] || '#e2e8f0';
   const cellPad = attrs['data-cell-padding'] || '10';
   const fontSize = attrs['data-font-size'] || '12';
@@ -424,31 +443,53 @@ function restyleAndSync(sel: any, el: HTMLElement, ed: any) {
   const headerColor = attrs['data-header-color'] || '#ffffff';
   const striped = attrs['data-striped'] !== 'false';
 
-  // Style ALL header cells
-  el.querySelectorAll('thead th').forEach((th: Element) => {
-    (th as HTMLElement).style.cssText =
-      `border:1px solid ${borderColor};padding:${cellPad}px;background:${headerBg};color:${headerColor};font-weight:600;text-align:left;font-size:${fontSize}px;`;
+  // Enforcement of table layout
+  tableComp.addStyle({ 
+    'table-layout': 'fixed',
+    'width': '100%',
+    'border-collapse': 'collapse'
   });
 
-  // Style ALL body cells with stripe alternation
-  const bodyRows = el.querySelectorAll('tbody tr');
-  bodyRows.forEach((tr: Element, rowIdx: number) => {
-    const stripeBg = striped && rowIdx % 2 === 1 ? 'background:#f8fafc;' : '';
-    tr.querySelectorAll('td').forEach((td: Element) => {
-      (td as HTMLElement).style.cssText =
-        `border:1px solid ${borderColor};padding:${cellPad}px;font-size:${fontSize}px;${stripeBg}`;
+  const thead = tableComp.components().models.find((c: any) => c.get('tagName') === 'thead');
+  const tbody = tableComp.components().models.find((c: any) => c.get('tagName') === 'tbody');
+
+  if (thead) {
+    thead.components().each((tr: any) => {
+      tr.components().each((th: any) => {
+        // Preserve width if set manually (e.g. via PropertyInspector)
+        const currentStyle = th.getStyle();
+        const existingWidth = currentStyle['width'];
+        
+        const newStyle = {
+          border: `1px solid ${borderColor}`,
+          padding: `${cellPad}px`,
+          background: headerBg,
+          color: headerColor,
+          'font-weight': '600',
+          'text-align': 'left',
+          'font-size': `${fontSize}px`
+        };
+        
+        if (existingWidth) (newStyle as any)['width'] = existingWidth;
+        th.setStyle(newStyle);
+      });
     });
-  });
+  }
 
-  // Sync: replace GrapesJS component with updated HTML
-  const html = el.outerHTML;
-  const parent = sel.parent();
-  const idx = parent.components().indexOf(sel);
-  sel.remove();
-  const newComps = parent.components().add(html, { at: idx });
-  // Re-select the new table component
-  if (newComps) {
-    const newComp = Array.isArray(newComps) ? newComps[0] : newComps;
-    if (newComp) setTimeout(() => ed.select(newComp), 50);
+  if (tbody) {
+    const rows = tbody.components().models;
+    rows.forEach((tr: any, idx: number) => {
+      const isOdd = idx % 2 === 1;
+      const bg = striped && isOdd ? '#f8fafc' : '';
+      
+      tr.components().each((td: any) => {
+        td.setStyle({
+          border: `1px solid ${borderColor}`,
+          padding: `${cellPad}px`,
+          'font-size': `${fontSize}px`,
+          background: bg
+        });
+      });
+    });
   }
 }
