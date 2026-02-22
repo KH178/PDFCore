@@ -1,0 +1,107 @@
+{
+  "manifest": { "name": "Comprehensive Layout Test", "version": "1.0" },
+  "settings": {
+    "size": "A4",
+    "orientation": "portrait",
+    "margins": { "top": 50, "bottom": 50, "left": 40, "right": 40 }
+  },
+  "styles": {
+    "title": { "font_family": "Roboto", "font_size": 28, "font_weight": "bold", "color": {"r": 0.2, "g": 0.3, "b": 0.6}, "text_align": "center", "margin": {"top": 0, "bottom": 20, "left": 0, "right": 0} },
+    "body": { "font_family": "Roboto", "font_size": 12, "line_height": 1.5, "color": {"r": 0.2, "g": 0.2, "b": 0.2} },
+    "subtitle": { "font_family": "Roboto", "font_size": 18, "font_weight": "bold", "color": {"r": 0.0, "g": 0.0, "b": 0.0}, "margin": {"top": 20, "bottom": 10, "left": 0, "right": 0} },
+    "box1": { "background_color": {"r": 0.95, "g": 0.95, "b": 0.95}, "padding": {"top": 15, "bottom": 15, "left": 15, "right": 15}, "border": {"top": 2, "bottom": 2, "left": 2, "right": 2}, "border_color": {"r": 0.7, "g": 0.7, "b": 0.7}, "border_radius": 8 }
+  },
+  "header": {
+    "type": "Container",
+    "background_color": {"r": 0.1, "g": 0.1, "b": 0.2},
+    "padding": {"top": 10, "bottom": 10, "left": 20, "right": 20},
+    "child": {
+      "type": "Row",
+      "children": [
+        { "type": "Text", "content": "CONFIDENTIAL DOCUMENT", "color": {"r": 1, "g": 1, "b": 1}, "size": 12, "weight": "bold" },
+        { "type": "Text", "content": "2026 Q3 Report", "color": {"r": 0.6, "g": 0.6, "b": 0.8}, "size": 10, "align": "right" }
+      ]
+    }
+  },
+  "footer": {
+    "type": "Container",
+    "padding": {"top": 10, "bottom": 0, "left": 0, "right": 0},
+    "border": {"top": 1, "bottom": 0, "left": 0, "right": 0},
+    "border_color": {"r": 0.8, "g": 0.8, "b": 0.8},
+    "child": {
+       "type": "Text",
+       "content": "Page {page} of {total}",
+       "size": 10,
+       "align": "right"
+    }
+  },
+  "root": {
+    "type": "Column",
+    "children": [
+       { "type": "Text", "content": "Elaborate PDF Layout Test", "style": "title" },
+       
+       { "type": "Text", "content": "1. Container Styles & Text Wrapping", "style": "subtitle" },
+       { "type": "Container", "style": "box1", "child": { 
+           "type": "Text", 
+           "content": "This is a Container using 'box1' style. It has 15px padding, a 2px gray border, 8px border radius, and a light gray background. This text should wrap cleanly within the bounds of the container without overflowing into the margins.", 
+           "style": "body" 
+       }},
+       
+       { "type": "Text", "content": "2. Flex Rows and Geometric Shapes", "style": "subtitle" },
+       { "type": "Row", "children": [
+           { 
+               "type": "Container", "width": 100, "height": 100, 
+               "background_color": {"r": 0.9, "g": 0.2, "b": 0.2}, "border_radius": 50,
+               "child": { "type": "Text", "content": "Circle", "color": {"r":1,"g":1,"b":1}, "align":"center" }
+           },
+           { 
+               "type": "Container", "width": 150, "height": 100, 
+               "background_color": {"r": 0.2, "g": 0.6, "b": 0.9}, "border": {"top":4,"bottom":4,"left":4,"right":4}, "border_color": {"r":0,"g":0,"b":0.5}, "border_radius": 15,
+               "child": { "type": "Text", "content": "Rounded Rect", "color": {"r":1,"g":1,"b":1}, "align":"center" }
+           },
+           { 
+               "type": "Container", "width": 200, "height": 2, 
+               "background_color": {"r": 0, "g": 0, "b": 0},
+               "margin": {"top": 50, "bottom": 0, "left": 0, "right": 0},
+               "child": { "type": "Text", "content": "" }
+           }
+       ]},
+       
+       { "type": "Text", "content": "3. Complex Table & Pagination Overflow", "style": "subtitle" },
+       { 
+           "type": "Table", 
+           "columns": [
+               { "header": "ID", "width": 50 }, 
+               { "header": "Description", "width": 250 },
+               { "header": "Amount", "width": 100 },
+               { "header": "Status", "width": 100 }
+           ], 
+           "rows": [
+               ["1001", "Initial project setup and scaffolding", "$500.00", "Done"],
+               ["1002", "Long description that should definitely wrap across multiple lines to prove the table engine can handle varying row heights without destroying the layout.", "$1,200.00", "Pending"],
+               ["1003", "Circle shape render fidelity", "$300.00", "Done"],
+               ["1004", "Multi-page layout tests", "$800.00", "In Progress"],
+               ["1005", "Adding repeating headers and footers to WASM", "$400.00", "Done"],
+               ["1006", "Test item 6", "$10.0", "Done"],
+               ["1007", "Test item 7", "$10.0", "Done"],
+               ["1008", "Test item 8", "$10.0", "Done"],
+               ["1009", "Test item 9 - Pushing towards page break", "$10.0", "Done"],
+               ["1010", "Test item 10", "$10.0", "Done"],
+               ["1011", "Test item 11", "$10.0", "Done"],
+               ["1012", "Test item 12", "$10.0", "Done"],
+               ["1013", "This item should hopefully be on page 2 or push the table boundaries.", "$10.0", "Done"],
+               ["1014", "Verifying table headers repeat on the next page.", "$10.0", "Done"]
+           ], 
+           "settings": { 
+               "border_width": 1, 
+               "border_color": {"r": 0.8, "g": 0.8, "b": 0.8},
+               "padding": 8, 
+               "striped": true,
+               "header_bg": {"r": 0.2, "g": 0.2, "b": 0.3},
+               "header_color": {"r": 1, "g": 1, "b": 1},
+               "alternate_row_color": {"r": 0.97, "g": 0.97, "b": 0.97}
+           } 
+       }
+    ]
+  }
+}

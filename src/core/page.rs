@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use crate::core::font::Font;
 use crate::core::writer::escape_string;
-use crate::core::table::{Table, TextAlign};
+use crate::core::table::Table;
 use crate::core::text;
 
 /// Represents a single page in a PDF document
@@ -220,6 +220,82 @@ impl Page {
         self
     }
     
+    /// Draw a colored rectangle (stroke)
+    pub fn draw_rect_colored(&mut self, x: f64, y: f64, w: f64, h: f64, width: f64, color: crate::core::color::Color) -> &mut Self {
+        let stroke_op = color.to_pdf_stroke();
+        let content = format!(
+            "q {} {} w {} {} {} {} re S Q ",
+            stroke_op, width, x, y, w, h
+        );
+        self.content.extend(content.into_bytes());
+        self
+    }
+    
+    /// Draw a rounded rectangle (stroke & fill)
+    pub fn draw_rect_rounded(&mut self, x: f64, y: f64, w: f64, h: f64, radius: f64, stroke_width: f64, stroke_color: Option<crate::core::color::Color>, fill_color: Option<crate::core::color::Color>) -> &mut Self {
+        self.content.extend(b"q ");
+        
+        if let Some(fill) = fill_color {
+            self.content.extend(fill.to_pdf_fill().as_bytes());
+            self.content.push(b' ');
+        }
+        if let Some(stroke) = stroke_color {
+            self.content.extend(stroke.to_pdf_stroke().as_bytes());
+            self.content.push(b' ');
+            let w_cmd = format!("{} w ", stroke_width);
+            self.content.extend(w_cmd.as_bytes());
+        }
+        
+        if radius <= 0.0 {
+            // Normal rectangle
+            let rect_cmd = format!("{} {} {} {} re ", x, y, w, h);
+            self.content.extend(rect_cmd.as_bytes());
+        } else {
+            // Bezier curve approximation for rounded corners
+            let r = radius.min(w / 2.0).min(h / 2.0);
+            let k = r * 0.552284749831;
+            
+            let path = format!(
+                "{} {} m \
+                 {} {} l \
+                 {} {} {} {} {} {} c \
+                 {} {} l \
+                 {} {} {} {} {} {} c \
+                 {} {} l \
+                 {} {} {} {} {} {} c \
+                 {} {} l \
+                 {} {} {} {} {} {} c \
+                 h ",
+                x + r, y, // start bottom left, rightwards
+                x + w - r, y, // line to bottom right
+                x + w - r + k, y, x + w, y + r - k, x + w, y + r, // curve to right bottom
+                x + w, y + h - r, // line to top right
+                x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h, // curve to top right
+                x + r, y + h, // line to top left
+                x + r - k, y + h, x, y + h - r + k, x, y + h - r, // curve to top left
+                x, y + r, // line to bottom left
+                x, y + r - k, x + r - k, y, x + r, y // curve to bottom left (back to start)
+            );
+            self.content.extend(path.as_bytes());
+        }
+        
+        let has_stroke = stroke_color.is_some() && stroke_width > 0.0;
+        let has_fill = fill_color.is_some();
+        
+        if has_fill && has_stroke {
+            self.content.extend(b"B ");
+        } else if has_fill {
+            self.content.extend(b"f ");
+        } else if has_stroke {
+            self.content.extend(b"S ");
+        } else {
+            self.content.extend(b"n ");
+        }
+        
+        self.content.extend(b"Q ");
+        self
+    }
+    
     /// Draw a filled rectangle (gray)
     pub fn draw_fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, gray: f64) -> &mut Self {
         let content = format!(
@@ -242,13 +318,13 @@ impl Page {
         let total_width: f64 = table.columns.iter().map(|c| c.width).sum();
         
         // Header background
-        self.draw_fill_rect(x, current_y - header_height, total_width, header_height, 0.9);
-        self.draw_rect(x, current_y - header_height, total_width, header_height, s.border_width);
+        self.draw_rect_filled(x, current_y - header_height, total_width, header_height, s.header_bg);
+        self.draw_rect_colored(x, current_y - header_height, total_width, header_height, s.border_width, s.border_color);
         
         // Header Content
         let mut current_x = x;
         // Set text color for header
-        let color_op = s.font_color.to_pdf_fill();
+        let color_op = s.header_color.to_pdf_fill();
         self.content.extend(color_op.as_bytes());
         self.content.push(b' ');
 
@@ -260,54 +336,126 @@ impl Page {
             self.text_with_font(col.header.clone(), current_x + s.padding, text_y, 10.0, font_index, font);
             
             // Vertical border
-            self.draw_rect(current_x, current_y - header_height, col.width, header_height, s.border_width);
+            self.draw_rect_colored(current_x, current_y - header_height, col.width, header_height, s.border_width, s.border_color);
             current_x += col.width;
         }
         current_y -= header_height;
         
-        // 2. Draw Rows
-        for row in &table.rows {
-            // Calculate required row height based on content
-            let font_size = s.font_size; // Use font size from settings
-            let leading = font_size * 1.2;
+        // 2. Pre-compute Row Heights (Pass 1)
+        let num_cols = table.columns.len();
+        let num_rows = table.rows.len();
+        let mut row_heights = vec![0.0; num_rows];
+        let mut active_rowspans = vec![0; num_cols];
+        let font_size = s.font_size;
+        let leading = font_size * 1.2;
+
+        for (r_i, row) in table.rows.iter().enumerate() {
             let mut max_lines = 1;
+            let mut c_i = 0;
             
-            // Check all cells in this row to find the maximum number of lines needed
-            for (i, cell_text) in row.iter().enumerate() {
-                let col_width = if i < table.columns.len() { table.columns[i].width } else { 100.0 };
-                let available_width = col_width - (2.0 * s.padding);
-                let lines = text::calculate_text_lines(cell_text, available_width, font_size, font);
-                max_lines = max_lines.max(lines);
+            for cell in row {
+                while c_i < num_cols && active_rowspans[c_i] > 0 {
+                    active_rowspans[c_i] -= 1;
+                    c_i += 1;
+                }
+                if c_i >= num_cols { break; } // Overflow protection
+
+                let colspan = cell.colspan.max(1);
+                
+                if cell.rowspan <= 1 {
+                    let mut width = 0.0;
+                    for c in c_i..(c_i + colspan).min(num_cols) {
+                        width += table.columns[c].width;
+                    }
+                    let avail = (width - (2.0 * s.padding)).max(1.0);
+                    let lines = text::calculate_text_lines(&cell.content, avail, font_size, font);
+                    max_lines = max_lines.max(lines);
+                } else {
+                    // Mark as spanning future rows
+                    for c in c_i..(c_i + colspan).min(num_cols) {
+                        active_rowspans[c] = cell.rowspan - 1;
+                    }
+                }
+                c_i += colspan;
             }
             
-            // Calculate row height: (lines * leading) + padding + extra space
-            let content_height = max_lines as f64 * leading;
-            let row_height = content_height + (2.0 * s.padding) + 8.0;
+            // Advance remaining trailing rowspans
+            while c_i < num_cols {
+                if active_rowspans[c_i] > 0 { active_rowspans[c_i] -= 1; }
+                c_i += 1;
+            }
+
+            row_heights[r_i] = (max_lines as f64 * leading) + (2.0 * s.padding) + 8.0;
+        }
+
+        // 3. Render Cells (Pass 2)
+        let mut active_rowspans = vec![0; num_cols];
+        
+        for (r_i, row) in table.rows.iter().enumerate() {
+            let row_height = row_heights[r_i];
             
-            current_x = x;
-            for (i, cell_text) in row.iter().enumerate() {
-                let width = if i < table.columns.len() { table.columns[i].width } else { 100.0 };
-                
-                // Draw text
-                // Explicitly use colored text to ensure reset
+            // Draw Striped Background
+            if s.striped && r_i % 2 == 1 {
+                self.draw_rect_filled(x, current_y - row_height, total_width, row_height, s.alternate_row_color);
+            }
+            
+            let mut current_x = x;
+            let mut c_i = 0;
+
+            for cell in row {
+                // Skip columns currently occupied by a rowspan from above
+                while c_i < num_cols && active_rowspans[c_i] > 0 {
+                    current_x += table.columns[c_i].width;
+                    active_rowspans[c_i] -= 1;
+                    c_i += 1;
+                }
+                if c_i >= num_cols { break; }
+
+                let colspan = cell.colspan.max(1);
+                let rowspan = cell.rowspan.max(1);
+                let end_col = (c_i + colspan).min(num_cols);
+
+                let mut cell_width = 0.0;
+                for c in c_i..end_col { cell_width += table.columns[c].width; }
+
+                let mut cell_height = 0.0;
+                let end_row = (r_i + rowspan).min(num_rows);
+                for r in r_i..end_row { cell_height += row_heights[r]; }
+
+                // Overwrite striping for tall rowspanned blocks to keep them solid
+                if rowspan > 1 && s.striped {
+                    self.draw_rect_filled(current_x, current_y - cell_height, cell_width, cell_height, crate::core::color::Color::white());
+                }
+
+                // Draw Text
                 self.text_multiline_colored(
-                    cell_text.clone(), 
-                    current_x + s.padding, 
-                    current_y - s.padding - 8.0, // Top padding
-                    width - (2.0 * s.padding), 
+                    cell.content.clone(),
+                    current_x + s.padding,
+                    current_y - s.padding - 8.0,
+                    cell_width - (2.0 * s.padding),
                     font_size,
-                    font_index, // Use passed font index
+                    font_index,
                     font,
                     s.font_color
                 );
-                
-                // Vertical border
-                self.draw_rect(current_x, current_y - row_height, width, row_height, s.border_width);
-                
-                current_x += width;
+
+                // Draw Border Box spanning the full dimension
+                self.draw_rect_colored(current_x, current_y - cell_height, cell_width, cell_height, s.border_width, s.border_color);
+
+                if rowspan > 1 {
+                    for c in c_i..end_col { active_rowspans[c] = rowspan - 1; }
+                }
+
+                current_x += cell_width;
+                c_i += colspan;
             }
-            
-            // Bottom border of row
+
+            // advance trailing occupied columns
+            while c_i < num_cols {
+                if active_rowspans[c_i] > 0 { active_rowspans[c_i] -= 1; }
+                c_i += 1;
+            }
+
             current_y -= row_height;
         }
         

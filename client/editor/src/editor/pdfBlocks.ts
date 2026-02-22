@@ -16,21 +16,21 @@ export function registerPDFBlocks(editor: Editor) {
   bm.add('pdf-column', {
     label: '📐 Column',
     category: 'Layout',
-    content: `<div data-pdf-type="Column" style="display:flex;flex-direction:column;gap:8px;min-height:60px;padding:12px;border:1px dashed #6366f1;border-radius:4px;"></div>`,
+    content: `<div data-pdf-type="Column" style="display:flex;flex-direction:column;gap:8px;min-height:60px;padding:12px;border-radius:4px;box-sizing:border-box;"></div>`,
     attributes: { class: 'fa fa-columns' },
   });
 
   bm.add('pdf-row', {
     label: '↔ Row (Inline)',
     category: 'Layout',
-    content: `<div data-pdf-type="Row" style="display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;min-height:40px;padding:12px;border:1px dashed #0ea5e9;border-radius:4px;"></div>`,
+    content: `<div data-pdf-type="Row" style="display:flex;flex-direction:row;flex-wrap:nowrap;gap:8px;min-height:40px;padding:12px;border-radius:4px;box-sizing:border-box;"></div>`,
     attributes: { class: 'fa fa-arrows-h' },
   });
 
   bm.add('pdf-container', {
     label: '☐ Container',
     category: 'Layout',
-    content: `<div data-pdf-type="Container" style="padding:16px;border:1px solid #d1d5db;min-height:40px;border-radius:4px;"></div>`,
+    content: `<div data-pdf-type="Container" style="padding:16px;border:1px solid #d1d5db;min-height:40px;border-radius:4px;box-sizing:border-box;"></div>`,
     attributes: { class: 'fa fa-square-o' },
   });
 
@@ -40,15 +40,15 @@ export function registerPDFBlocks(editor: Editor) {
     category: 'Layout',
     content: {
       type: 'pdf-row-comp',
-      style: { display: 'flex', 'flex-direction': 'row', gap: '12px', 'min-height': '60px', padding: '12px', border: '1px dashed #0ea5e9', 'border-radius': '4px' },
+      style: { display: 'flex', 'flex-direction': 'row', gap: '12px', 'min-height': '60px', padding: '12px', 'border-radius': '4px', 'box-sizing': 'border-box' },
       components: [
         {
           type: 'pdf-column-comp',
-          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', border: '1px dashed #6366f1', 'border-radius': '4px' },
+          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', 'border-radius': '4px', 'box-sizing': 'border-box' },
         },
         {
           type: 'pdf-column-comp',
-          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', border: '1px dashed #6366f1', 'border-radius': '4px' },
+          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', 'border-radius': '4px', 'box-sizing': 'border-box' },
         },
       ],
     },
@@ -61,19 +61,19 @@ export function registerPDFBlocks(editor: Editor) {
     category: 'Layout',
     content: {
       type: 'pdf-row-comp',
-      style: { display: 'flex', 'flex-direction': 'row', gap: '12px', 'min-height': '60px', padding: '12px', border: '1px dashed #0ea5e9', 'border-radius': '4px' },
+      style: { display: 'flex', 'flex-direction': 'row', gap: '12px', 'min-height': '60px', padding: '12px', 'border-radius': '4px', 'box-sizing': 'border-box' },
       components: [
         {
           type: 'pdf-column-comp',
-          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', border: '1px dashed #6366f1', 'border-radius': '4px' },
+          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', 'border-radius': '4px', 'box-sizing': 'border-box' },
         },
         {
           type: 'pdf-column-comp',
-          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', border: '1px dashed #6366f1', 'border-radius': '4px' },
+          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', 'border-radius': '4px', 'box-sizing': 'border-box' },
         },
         {
           type: 'pdf-column-comp',
-          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', border: '1px dashed #6366f1', 'border-radius': '4px' },
+          style: { flex: '1', display: 'flex', 'flex-direction': 'column', gap: '8px', 'min-height': '40px', padding: '12px', 'border-radius': '4px', 'box-sizing': 'border-box' },
         },
       ],
     },
@@ -210,7 +210,7 @@ export function buildTableHtml(
   const tdS = (ri: number) => `border:1px solid ${borderColor};padding:${cellPadding}px;font-size:${fontSize}px;${stripedRows && ri % 2 === 1 ? 'background:#f8fafc;' : ''}`;
   const ths = Array.from({ length: cols }, (_, i) => `<th style="${thS}">${headers?.[i] || `Column ${i + 1}`}</th>`).join('');
   const trs = Array.from({ length: rows }, (_, ri) =>
-    `<tr>${Array.from({ length: cols }, (_, ci) => `<td style="${tdS(ri)}">${data?.[ri]?.[ci] || 'Data'}</td>`).join('')}</tr>`
+    `<tr>${Array.from({ length: cols }, (_, ci) => `<td data-gjs-type="pdf-td" style="${tdS(ri)}">${data?.[ri]?.[ci] || 'Data'}</td>`).join('')}</tr>`
   ).join('');
   return `<table data-pdf-type="Table" data-header-bg="${headerBg}" data-header-color="${headerColor}" data-border-color="${borderColor}" data-cell-padding="${cellPadding}" data-font-size="${fontSize}" data-striped="${stripedRows}" style="width:100%;border-collapse:collapse;font-size:${fontSize}px;table-layout:fixed;"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
 }

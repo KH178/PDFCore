@@ -88,7 +88,6 @@ pub fn split_text_at_lines(text: &str, width: f64, size: f64, font: &Font, max_l
     let words: Vec<&str> = text.split_whitespace().collect();
     // let mut buffer = Vec::new(); // Unused in split version
     let mut current_lines = 1;
-    let mut consumed_words = 0;
     
     // Naive re-implementation for MVP (ideally we refactor to shared iterator)
     // We will build the "Head" string.
@@ -106,7 +105,7 @@ pub fn split_text_at_lines(text: &str, width: f64, size: f64, font: &Font, max_l
     while let Some(&word) = word_iter.peek() {
         // word is &&str here because peek returns &Item
         
-        let word_width = font.measure_text(word, size);
+        let _word_width = font.measure_text(word, size);
         
         // Check if word fits in current line
         let mut test_line = line_buffer.clone();

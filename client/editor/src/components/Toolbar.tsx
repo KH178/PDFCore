@@ -1,10 +1,8 @@
-/**
- * Toolbar — top bar with document actions, undo/redo, zoom, and export/import.
- */
 import { useRef, useState, useEffect } from 'react';
 import type grapesjs from 'grapesjs';
 import { editorToTemplate, templateToEditor } from '../editor/converter';
 import { exportTemplate, importTemplate, downloadBlob, collectAssetsFromEditor } from '../editor/templateIO';
+import PreviewModal from './PreviewModal';
 
 type Editor = grapesjs.Editor;
 
@@ -16,6 +14,8 @@ export default function Toolbar({ editor }: ToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [pageSize, setPageSize] = useState('A4 Portrait');
 
   useEffect(() => {
     if (!editor) return;
@@ -66,6 +66,7 @@ export default function Toolbar({ editor }: ToolbarProps) {
 
   const handlePageSize = (device: string) => {
     if (!editor) return;
+    setPageSize(device);
     editor.setDevice(device);
   };
 
@@ -87,8 +88,8 @@ export default function Toolbar({ editor }: ToolbarProps) {
       {/* Page Size */}
       <select
         onChange={(e) => handlePageSize(e.target.value)}
+        value={pageSize}
         className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300 cursor-pointer"
-        defaultValue="A4 Portrait"
       >
         <option value="A4 Portrait">A4 Portrait</option>
         <option value="A4 Landscape">A4 Landscape</option>
@@ -111,6 +112,17 @@ export default function Toolbar({ editor }: ToolbarProps) {
         📂 Import
       </button>
 
+      <div className="w-px h-5 bg-gray-700 mx-1" />
+
+      <button
+        onClick={() => setShowPreview(true)}
+        className="px-3 py-1 rounded bg-indigo-500 hover:bg-indigo-400 text-white transition text-[11px] font-medium cursor-pointer flex items-center gap-1"
+        disabled={!editor}
+      >
+        <i className="fa fa-play text-[9px]" />
+        Preview
+      </button>
+
       <input
         ref={fileInputRef}
         type="file"
@@ -118,6 +130,14 @@ export default function Toolbar({ editor }: ToolbarProps) {
         className="hidden"
         onChange={handleImportFile}
       />
+
+      {showPreview && editor && (
+        <PreviewModal 
+          template={editorToTemplate(editor)} 
+          assets={collectAssetsFromEditor(editor)} 
+          onClose={() => setShowPreview(false)} 
+        />
+      )}
     </div>
   );
 }

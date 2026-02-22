@@ -101,7 +101,7 @@ impl<W: WriteSeek> PdfWriter<W> {
     pub fn write_object(&mut self, id: u32, object: &PdfObject) -> io::Result<()> {
        self.xref.push((id, self.offset));
        
-       let start_offset = self.offset;
+       let _start_offset = self.offset;
        
        // Write object to buffer
        write!(self.writer, "{} 0 obj\n", id)?;

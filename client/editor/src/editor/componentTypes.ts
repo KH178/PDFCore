@@ -112,15 +112,30 @@ export function registerComponentTypes(editor: Editor) {
         droppable: false,
         editable: true,
         toolbar: [
-          { attributes: { class: 'fa fa-arrows', title: 'Move' }, command: 'tlb-move' },
-          { attributes: { class: 'fa fa-plus-square', title: 'Add Column' }, command: 'table-add-col' },
-          { attributes: { class: 'fa fa-minus-square', title: 'Remove Column' }, command: 'table-remove-col' },
-          { attributes: { class: 'fa fa-plus-circle', title: 'Add Row' }, command: 'table-add-row' },
-          { attributes: { class: 'fa fa-minus-circle', title: 'Remove Row' }, command: 'table-remove-row' },
-          { attributes: { class: 'fa fa-trash-o', title: 'Delete' }, command: 'tlb-delete' },
+           { attributes: { class: 'fa fa-arrows', title: 'Move' }, command: 'tlb-move' },
+           { attributes: { class: 'fa fa-plus-square', title: 'Add Column' }, command: 'table-add-col' },
+           { attributes: { class: 'fa fa-minus-square', title: 'Remove Column' }, command: 'table-remove-col' },
+           { attributes: { class: 'fa fa-plus-circle', title: 'Add Row' }, command: 'table-add-row' },
+           { attributes: { class: 'fa fa-minus-circle', title: 'Remove Row' }, command: 'table-remove-row' },
+           { attributes: { class: 'fa fa-trash-o', title: 'Delete' }, command: 'tlb-delete' },
         ],
       },
     },
+  });
+
+  dc.addType('pdf-tr', {
+    isComponent: (el: any) => el.tagName === 'TR' ? { type: 'pdf-tr' } : false,
+    model: { defaults: { tagName: 'tr', droppable: true, draggable: true } }
+  });
+
+  dc.addType('pdf-th', {
+    isComponent: (el: any) => el.tagName === 'TH' ? { type: 'pdf-th' } : false,
+    model: { defaults: { tagName: 'th', droppable: true, draggable: true, editable: true } }
+  });
+
+  dc.addType('pdf-td', {
+    isComponent: (el: any) => el.tagName === 'TD' ? { type: 'pdf-td' } : false,
+    model: { defaults: { tagName: 'td', droppable: true, draggable: true, editable: true } }
   });
 
   // ═══ SHAPES ══════════════════════════════════════════════════════════
@@ -356,13 +371,13 @@ export function registerEditorCommands(editor: Editor) {
       if (thead) {
         thead.components().each((tr: any) => {
           const colIdx = tr.components().length + 1;
-          tr.components().add(`<th>Col ${colIdx}</th>`);
+          tr.components().add({ type: 'pdf-th', content: `Col ${colIdx}` });
         });
       }
       
       if (tbody) {
         tbody.components().each((tr: any) => {
-          tr.components().add(`<td>Data</td>`);
+          tr.components().add({ type: 'pdf-td', content: 'Data' });
         });
       }
       restyleTable(sel); // Updates styles on new cells
@@ -406,8 +421,8 @@ export function registerEditorCommands(editor: Editor) {
       const firstRow = tbody.components().models[0];
       const colCount = firstRow ? firstRow.components().length : 3;
       
-      const tds = Array(colCount).fill('<td>Data</td>').join('');
-      tbody.components().add(`<tr>${tds}</tr>`);
+      const tds = Array(colCount).fill({ type: 'pdf-td', content: 'Data' });
+      tbody.components().add({ type: 'pdf-tr', components: tds });
       
       restyleTable(sel);
     },
@@ -467,7 +482,8 @@ function restyleTable(tableComp: any) {
           color: headerColor,
           'font-weight': '600',
           'text-align': 'left',
-          'font-size': `${fontSize}px`
+          'font-size': `${fontSize}px`,
+          'display': 'table-cell'
         };
         
         if (existingWidth) (newStyle as any)['width'] = existingWidth;
@@ -487,7 +503,8 @@ function restyleTable(tableComp: any) {
           border: `1px solid ${borderColor}`,
           padding: `${cellPad}px`,
           'font-size': `${fontSize}px`,
-          background: bg
+          background: bg,
+          'display': 'table-cell'
         });
       });
     });

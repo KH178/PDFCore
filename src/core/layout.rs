@@ -84,9 +84,55 @@ pub trait LayoutNode {
 
 // --- Components ---
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum FlexAlign {
+    #[default]
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
+impl FlexAlign {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "center" => Self::Center,
+            "flex-end" | "end" => Self::End,
+            "stretch" => Self::Stretch,
+            _ => Self::Start,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum FlexJustify {
+    #[default]
+    Start,
+    Center,
+    End,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+impl FlexJustify {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "center" => Self::Center,
+            "flex-end" | "end" => Self::End,
+            "space-between" => Self::SpaceBetween,
+            "space-around" => Self::SpaceAround,
+            "space-evenly" => Self::SpaceEvenly,
+            _ => Self::Start,
+        }
+    }
+}
+
 pub struct Column {
     pub children: Vec<Arc<dyn LayoutNode>>,
     pub spacing: f64,
+    pub align_items: FlexAlign,
+    pub justify_content: FlexJustify,
 }
 
 impl LayoutNode for Column {
@@ -109,18 +155,59 @@ impl LayoutNode for Column {
     }
 
     fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
-        let mut y = area.y;
+        let mut child_sizes = Vec::with_capacity(self.children.len());
+        let mut total_child_height = 0.0;
         
         for child in &self.children {
             let size = child.measure(Constraints::loose(area.width, f64::INFINITY), font);
+            total_child_height += size.height;
+            child_sizes.push(size);
+        }
+        
+        if !self.children.is_empty() {
+            total_child_height += self.spacing * (self.children.len() as f64 - 1.0);
+        }
+        
+        let (mut y, spacing_add) = match self.justify_content {
+            FlexJustify::Start => (area.y, 0.0),
+            FlexJustify::Center => (area.y - (area.height - total_child_height) / 2.0, 0.0),
+            FlexJustify::End => (area.y - (area.height - total_child_height), 0.0),
+            FlexJustify::SpaceBetween => {
+                let gaps = self.children.len() as f64 - 1.0;
+                let extra = if gaps > 0.0 { (area.height - total_child_height) / gaps } else { 0.0 };
+                (area.y, extra)
+            },
+            FlexJustify::SpaceAround => {
+                let gaps = self.children.len() as f64;
+                let extra = if gaps > 0.0 { (area.height - total_child_height) / gaps } else { 0.0 };
+                (area.y - extra / 2.0, extra)
+            },
+            FlexJustify::SpaceEvenly => {
+                let gaps = self.children.len() as f64 + 1.0;
+                let extra = if gaps > 0.0 { (area.height - total_child_height) / gaps } else { 0.0 };
+                (area.y - extra, extra)
+            },
+        };
+
+        for (i, child) in self.children.iter().enumerate() {
+            let size = child_sizes[i];
+            
+            let x = match self.align_items {
+                FlexAlign::Start => area.x,
+                FlexAlign::Center => area.x + (area.width - size.width) / 2.0,
+                FlexAlign::End => area.x + (area.width - size.width),
+                FlexAlign::Stretch => area.x,
+            };
+            
             let child_area = Rect {
-                x: area.x,
+                x,
                 y,
-                width: area.width, 
+                width: if matches!(self.align_items, FlexAlign::Stretch) { area.width } else { size.width }, 
                 height: size.height,
             };
+            
             child.render(page, child_area, font, font_index, context);
-            y -= size.height + self.spacing; 
+            y -= size.height + self.spacing + spacing_add; 
         }
     }
 
@@ -201,8 +288,8 @@ impl LayoutNode for Column {
                 return SplitAction::Push;
             }
             
-            let head_col: Arc<dyn LayoutNode> = Arc::new(Column { children: head_children, spacing: self.spacing });
-            let tail_col: Arc<dyn LayoutNode> = Arc::new(Column { children: tail_children, spacing: self.spacing });
+            let head_col: Arc<dyn LayoutNode> = Arc::new(Column { children: head_children, spacing: self.spacing, align_items: self.align_items, justify_content: self.justify_content });
+            let tail_col: Arc<dyn LayoutNode> = Arc::new(Column { children: tail_children, spacing: self.spacing, align_items: self.align_items, justify_content: self.justify_content });
             
             SplitAction::Split(head_col, tail_col)
         } else {
@@ -215,6 +302,8 @@ impl LayoutNode for Column {
 pub struct Row {
     pub children: Vec<Arc<dyn LayoutNode>>,
     pub spacing: f64,
+    pub align_items: FlexAlign,
+    pub justify_content: FlexJustify,
 }
 
 impl LayoutNode for Row {
@@ -236,18 +325,58 @@ impl LayoutNode for Row {
     }
 
     fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
-        let mut x = area.x;
+        let mut child_sizes = Vec::with_capacity(self.children.len());
+        let mut total_child_width = 0.0;
         
         for child in &self.children {
-             let size = child.measure(Constraints::loose(f64::INFINITY, area.height), font);
-             let child_area = Rect {
+            let size = child.measure(Constraints::loose(f64::INFINITY, area.height), font);
+            total_child_width += size.width;
+            child_sizes.push(size);
+        }
+
+        if !self.children.is_empty() {
+            total_child_width += self.spacing * (self.children.len() as f64 - 1.0);
+        }
+        
+        let (mut x, spacing_add) = match self.justify_content {
+            FlexJustify::Start => (area.x, 0.0),
+            FlexJustify::Center => (area.x + (area.width - total_child_width) / 2.0, 0.0),
+            FlexJustify::End => (area.x + (area.width - total_child_width), 0.0),
+            FlexJustify::SpaceBetween => {
+                let gaps = self.children.len() as f64 - 1.0;
+                let extra = if gaps > 0.0 { (area.width - total_child_width) / gaps } else { 0.0 };
+                (area.x, extra)
+            },
+            FlexJustify::SpaceAround => {
+                let gaps = self.children.len() as f64;
+                let extra = if gaps > 0.0 { (area.width - total_child_width) / gaps } else { 0.0 };
+                (area.x + extra / 2.0, extra)
+            },
+            FlexJustify::SpaceEvenly => {
+                let gaps = self.children.len() as f64 + 1.0;
+                let extra = if gaps > 0.0 { (area.width - total_child_width) / gaps } else { 0.0 };
+                (area.x + extra, extra)
+            },
+        };
+        
+        for (i, child) in self.children.iter().enumerate() {
+            let size = child_sizes[i];
+             
+            let y = match self.align_items {
+                FlexAlign::Start => area.y,
+                FlexAlign::Center => area.y - (area.height - size.height) / 2.0,
+                FlexAlign::End => area.y - (area.height - size.height),
+                FlexAlign::Stretch => area.y,
+            };
+            
+            let child_area = Rect {
                 x,
-                y: area.y,
+                y,
                 width: size.width, 
-                height: area.height, 
+                height: if matches!(self.align_items, FlexAlign::Stretch) { area.height } else { size.height }, 
             };
             child.render(page, child_area, font, font_index, context);
-            x += size.width + self.spacing;
+            x += size.width + self.spacing + spacing_add;
         }
     }
 
@@ -323,56 +452,113 @@ impl LayoutNode for TextNode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Spacing {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
+impl Spacing {
+    pub fn new(top: f64, right: f64, bottom: f64, left: f64) -> Self {
+        Self { top, right, bottom, left }
+    }
+    
+    pub fn uniform(val: f64) -> Self {
+        Self { top: val, right: val, bottom: val, left: val }
+    }
+    
+    pub fn horizontal(&self) -> f64 { self.left + self.right }
+    pub fn vertical(&self) -> f64 { self.top + self.bottom }
+}
+
 pub struct Container {
     pub child: Arc<dyn LayoutNode>,
-    pub padding: f64,
-    pub border_width: f64,
+    pub padding: Spacing,
+    pub margin: Spacing,
+    pub border_width: Spacing,
+    pub border_color: Option<crate::core::color::Color>,
+    pub border_radius: f64,
+    pub width: f64,
+    pub height: f64,
+    pub background_color: Option<crate::core::color::Color>,
 }
 
 impl LayoutNode for Container {
     fn measure(&self, constraints: Constraints, font: &Font) -> Size {
-        // Decrease constraints by padding (2x) and border (2x)
-        let reduction = (self.padding + self.border_width) * 2.0;
+        let reduction_w = self.padding.horizontal() + self.margin.horizontal() + self.border_width.horizontal();
+        let reduction_h = self.padding.vertical() + self.margin.vertical() + self.border_width.vertical();
+        
+        let max_w = if self.width > 0.0 { self.width + self.margin.horizontal() } else { constraints.max_width };
+        let max_h = if self.height > 0.0 { self.height + self.margin.vertical() } else { constraints.max_height };
         
         let child_constraints = Constraints {
-            min_width: (constraints.min_width - reduction).max(0.0),
-            max_width: (constraints.max_width - reduction).max(0.0),
-            min_height: (constraints.min_height - reduction).max(0.0),
-            max_height: (constraints.max_height - reduction).max(0.0),
+            min_width: (constraints.min_width - reduction_w).max(0.0),
+            max_width: (max_w - reduction_w).max(0.0),
+            min_height: (constraints.min_height - reduction_h).max(0.0),
+            max_height: (max_h - reduction_h).max(0.0),
         };
         
         let child_size = self.child.measure(child_constraints, font);
         
         Size {
-            width: child_size.width + reduction,
-            height: child_size.height + reduction,
+            width: if self.width > 0.0 { self.width + self.margin.horizontal() } else { child_size.width + reduction_w },
+            height: if self.height > 0.0 { self.height + self.margin.vertical() } else { child_size.height + reduction_h },
         }
     }
 
     fn render(&self, page: &mut Page, area: Rect, font: &Font, font_index: u32, context: &PageContext) {
-        // Draw border if width > 0
-        if self.border_width > 0.0 {
-            // PDF rect is bottom-up. area.y is TOP.
-            // We must draw from bottom-left: y - height
-            let bottom_y = area.y - area.height;
-            page.draw_rect(area.x, bottom_y, area.width, area.height, self.border_width);
+        let actual_area = Rect {
+             x: area.x + self.margin.left,
+             y: area.y - self.margin.top,
+             width: area.width - self.margin.horizontal(),
+             height: area.height - self.margin.vertical(),
+        };
+
+        // Compute the actual height this container occupies (measured, not the full available height)
+        let inner_w = (actual_area.width - self.padding.horizontal() - self.border_width.horizontal()).max(0.0);
+        let inner_h = (actual_area.height - self.padding.vertical() - self.border_width.vertical()).max(0.0);
+        let measured = if self.height > 0.0 {
+            self.height
+        } else {
+            let child_size = self.child.measure(Constraints::loose(inner_w, inner_h), font);
+            child_size.height + self.padding.vertical() + self.border_width.vertical()
+        };
+        let draw_height = measured.min(actual_area.height);
+        let bottom_y = actual_area.y - draw_height;
+        
+        let max_border = self.border_width.left.max(self.border_width.top).max(self.border_width.right).max(self.border_width.bottom);
+        
+        if self.background_color.is_some() || max_border > 0.0 {
+            page.draw_rect_rounded(
+                actual_area.x, 
+                bottom_y, 
+                actual_area.width, 
+                draw_height, 
+                self.border_radius, 
+                max_border, 
+                self.border_color, 
+                self.background_color
+            );
         }
         
-        let reduction = self.padding + self.border_width;
         let child_area = Rect {
-            x: area.x + reduction,
-            y: area.y - reduction, // PDF: Y goes UP, so "inner" top is Y - padding
-            width: area.width - (reduction * 2.0),
-            height: area.height - (reduction * 2.0),
+            x: actual_area.x + self.border_width.left + self.padding.left,
+            y: actual_area.y - self.border_width.top - self.padding.top,
+            width: actual_area.width - (self.border_width.horizontal() + self.padding.horizontal()),
+            height: actual_area.height - (self.border_width.vertical() + self.padding.vertical()),
         };
         
         self.child.render(page, child_area, font, font_index, context);
     }
 
     fn split(&self, available_width: f64, available_height: f64, font: &Font) -> SplitAction {
-        let reduction = (self.padding + self.border_width) * 2.0;
-        let child_avail_h = available_height - reduction;
-        let child_avail_w = available_width - reduction;
+        let reduction_h = self.padding.vertical() + self.margin.vertical() + self.border_width.vertical();
+        let reduction_w = self.padding.horizontal() + self.margin.horizontal() + self.border_width.horizontal();
+        
+        let child_avail_h = available_height - reduction_h;
+        let child_avail_w = available_width - reduction_w;
 
         if child_avail_h <= 0.0 {
              return SplitAction::Push; 
@@ -382,9 +568,8 @@ impl LayoutNode for Container {
             SplitAction::Fit => SplitAction::Fit,
             SplitAction::Push => SplitAction::Push,
             SplitAction::Split(head, tail) => {
-                // Wrap head and tail in new Containers with same padding/border
-                let head_container: Arc<dyn LayoutNode> = Arc::new(Container { child: head, padding: self.padding, border_width: self.border_width });
-                let tail_container: Arc<dyn LayoutNode> = Arc::new(Container { child: tail, padding: self.padding, border_width: self.border_width });
+                let head_container: Arc<dyn LayoutNode> = Arc::new(Container { child: head, padding: self.padding, margin: self.margin, border_width: self.border_width, border_color: self.border_color, border_radius: self.border_radius, width: self.width, height: 0.0, background_color: self.background_color });
+                let tail_container: Arc<dyn LayoutNode> = Arc::new(Container { child: tail, padding: self.padding, margin: self.margin, border_width: self.border_width, border_color: self.border_color, border_radius: self.border_radius, width: self.width, height: 0.0, background_color: self.background_color });
                 SplitAction::Split(head_container, tail_container)
             }
         }
@@ -456,13 +641,23 @@ impl LayoutNode for TableNode {
 
         for row in &self.table.rows {
              let mut max_lines = 1;
-             for (i, cell_text) in row.iter().enumerate() {
-                let col_width = if i < self.table.columns.len() { self.table.columns[i].width } else { 100.0 };
-                let available_width = col_width - (2.0 * s.padding);
+             let mut c_i = 0;
+             for cell in row.iter() {
+                let cell_text = &cell.content;
+                let mut col_width = 0.0;
+                let end_col = (c_i + cell.colspan).min(self.table.columns.len());
+                for c in c_i..end_col {
+                    col_width += self.table.columns[c].width;
+                }
+                if col_width == 0.0 { col_width = 100.0; } // Fallback
+                
+                let available_width = (col_width - (2.0 * s.padding)).max(1.0);
                 let lines = text::calculate_text_lines(cell_text, available_width, font_size, font);
                 max_lines = max_lines.max(lines);
+                c_i += cell.colspan;
              }
              let content_height = max_lines as f64 * leading;
+             // Minimum height for a row is cell_content + padding
              let row_height = content_height + (2.0 * s.padding) + 8.0;
              height += row_height;
         }
@@ -495,11 +690,20 @@ impl LayoutNode for TableNode {
          for (i, row) in self.table.rows.iter().enumerate() {
              // Calculate row height
              let mut max_lines = 1;
-             for (j, cell_text) in row.iter().enumerate() {
-                let col_width = if j < self.table.columns.len() { self.table.columns[j].width } else { 100.0 };
-                let available_width = col_width - (2.0 * s.padding);
+             let mut c_i = 0;
+             for cell in row.iter() {
+                let cell_text = &cell.content;
+                let mut col_width = 0.0;
+                let end_col = (c_i + cell.colspan).min(self.table.columns.len());
+                for c in c_i..end_col {
+                    col_width += self.table.columns[c].width;
+                }
+                if col_width == 0.0 { col_width = 100.0; } // Fallback
+                
+                let available_width = (col_width - (2.0 * s.padding)).max(1.0);
                 let lines = text::calculate_text_lines(cell_text, available_width, font_size, font);
                 max_lines = max_lines.max(lines);
+                c_i += cell.colspan;
              }
              let content_height = max_lines as f64 * leading;
              let row_height = content_height + (2.0 * s.padding) + 8.0;

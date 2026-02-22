@@ -108,6 +108,8 @@ export interface ManifestInfo {
 
 export interface PDFCoreTemplate {
   root: TemplateNode;
+  header?: TemplateNode;
+  footer?: TemplateNode;
   pages?: TemplateNode[];   // multi-page support
   manifest?: ManifestInfo;
   styles: Record<string, unknown>;

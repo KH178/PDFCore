@@ -70,13 +70,25 @@ pub enum TemplateNode {
         #[serde(default)]
         style: Option<String>,
     },
-    /// Empty space or container
+    /// Empty space or container, used for shapes, spacing, and styled blocks
     Container {
         child: Box<TemplateNode>,
         #[serde(default)]
         padding: Option<f64>,
         #[serde(default)]
+        margin: Option<f64>,
+        #[serde(default)]
         border: Option<f64>,
+        #[serde(default)]
+        border_color: Option<Color>,
+        #[serde(default)]
+        border_radius: Option<f64>,
+        #[serde(default)]
+        background_color: Option<Color>,
+        #[serde(default)]
+        width: Option<f64>,
+        #[serde(default)]
+        height: Option<f64>,
         #[serde(default)]
         style: Option<String>,
     },
@@ -84,7 +96,7 @@ pub enum TemplateNode {
     Table {
         columns: Vec<crate::core::table::TableColumn>,
         #[serde(default)]
-        rows: Vec<Vec<String>>,
+        rows: Vec<Vec<crate::core::table::TableCell>>,
         #[serde(default)]
         settings: Option<crate::core::table::TableSettings>,
         #[serde(default)]
@@ -323,12 +335,22 @@ impl TemplateNode {
             TemplateNode::Column { children, spacing, style } => {
                 let nodes: Vec<Arc<dyn CoreLayoutNode>> = children.iter().map(|c| c.to_layout_node(data, asset_indices, styles)).collect();
                 let spacing_val = resolve_prop(*spacing, style.as_ref(), styles, |s| s.spacing, 0.0);
-                Arc::new(Column { children: nodes, spacing: spacing_val })
+                Arc::new(Column { 
+                    children: nodes, 
+                    spacing: spacing_val, 
+                    align_items: crate::core::layout::FlexAlign::Start, 
+                    justify_content: crate::core::layout::FlexJustify::Start 
+                })
             },
             TemplateNode::Row { children, spacing, style } => {
                 let nodes = children.iter().map(|c| c.to_layout_node(data, asset_indices, styles)).collect();
                 let spacing_val = resolve_prop(*spacing, style.as_ref(), styles, |s| s.spacing, 0.0);
-                Arc::new(Row { children: nodes, spacing: spacing_val })
+                Arc::new(Row { 
+                    children: nodes, 
+                    spacing: spacing_val, 
+                    align_items: crate::core::layout::FlexAlign::Start, 
+                    justify_content: crate::core::layout::FlexJustify::Start 
+                })
             },
             TemplateNode::Text { content, size, color, background_color, width: _, style } => {
                 // Resolve content
@@ -344,14 +366,24 @@ impl TemplateNode {
                      background_color: bg_val 
                 })
             },
-            TemplateNode::Container { child, padding, border, style } => {
+            TemplateNode::Container { child, padding, margin, border, border_color, border_radius, background_color, width, height, style } => {
                  let padding_val = resolve_prop(*padding, style.as_ref(), styles, |s| s.padding, 0.0);
+                 let margin_val = resolve_prop(*margin, style.as_ref(), styles, |s| s.padding, 0.0);
                  let border_val = resolve_prop(*border, style.as_ref(), styles, |s| s.border, 0.0);
+                 let w_val = resolve_prop(*width, style.as_ref(), styles, |s| s.width, 0.0);
+                 let h_val = resolve_prop(*height, style.as_ref(), styles, |s| s.height, 0.0);
+                 let bg = background_color.or_else(|| resolve_option(None, style.as_ref(), styles, |s| s.background_color));
                  
                  Arc::new(Container {
                      child: child.to_layout_node(data, asset_indices, styles),
-                     padding: padding_val,
-                     border_width: border_val,
+                     padding: crate::core::layout::Spacing::uniform(padding_val),
+                     margin: crate::core::layout::Spacing::uniform(margin_val),
+                     border_width: crate::core::layout::Spacing::uniform(border_val),
+                     border_color: border_color.or(None),
+                     border_radius: border_radius.unwrap_or(0.0),
+                     width: w_val,
+                     height: h_val,
+                     background_color: bg,
                  })
             },
             TemplateNode::Image { src, width, height, style } => {
@@ -384,8 +416,12 @@ impl TemplateNode {
 
                  // 1. If static rows exist, include them (with variable substitution!)
                  for r in rows {
-                     let resolved_row: Vec<String> = r.iter()
-                         .map(|cell| resolve_template_string(cell, data))
+                     let resolved_row: Vec<crate::core::table::TableCell> = r.iter()
+                         .map(|cell| crate::core::table::TableCell {
+                             content: resolve_template_string(&cell.content, data),
+                             colspan: cell.colspan,
+                             rowspan: cell.rowspan,
+                         })
                          .collect();
                      final_rows.push(resolved_row);
                  }
@@ -403,12 +439,12 @@ impl TemplateNode {
                              for item in arr {
                                  let mut row_vec = Vec::new();
                                  for col in columns {
-                                     if let Some(field) = &col.field {
-                                          let val = resolve_json_path(field, item).unwrap_or_default();
-                                          row_vec.push(val);
+                                     let val = if let Some(field) = &col.field {
+                                          resolve_json_path(field, item).unwrap_or_default()
                                      } else {
-                                          row_vec.push("".to_string());
-                                     }
+                                          "".to_string()
+                                     };
+                                     row_vec.push(crate::core::table::TableCell { content: val, colspan: 1, rowspan: 1 });
                                  }
                                  final_rows.push(row_vec);
                              }

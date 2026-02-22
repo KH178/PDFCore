@@ -1,4 +1,4 @@
-mod core;
+pub mod core;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod napi;

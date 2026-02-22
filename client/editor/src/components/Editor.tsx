@@ -16,6 +16,8 @@ import { registerPDFBlocks } from '../editor/pdfBlocks';
 import { registerComponentTypes, registerEditorCommands } from '../editor/componentTypes';
 import PropertyInspector from './PropertyInspector';
 import Toolbar from './Toolbar';
+import { PDF_TEMPLATES } from '../editor/pdfTemplates';
+import { templateToEditor } from '../editor/converter';
 
 // Page sizes in points (1pt = 1px at 72dpi, the PDF standard)
 const PAGE_SIZES: Record<string, { w: number; h: number }> = {
@@ -27,7 +29,7 @@ const PAGE_SIZES: Record<string, { w: number; h: number }> = {
 export default function PDFEditor() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [editor, setEditor] = useState<EditorType | null>(null);
-  const [activeTab, setActiveTab] = useState<'blocks' | 'properties'>('blocks');
+  const [activeTab, setActiveTab] = useState<'blocks' | 'properties' | 'templates'>('templates');
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -40,7 +42,7 @@ export default function PDFEditor() {
       height: '100%',
       width: '100%',
       fromElement: false,
-      storageManager: false,
+      storageManager: { id: '', type: 'local', autosave: false, autoload: false },
 
       canvas: {
         styles: [
@@ -69,88 +71,48 @@ export default function PDFEditor() {
     registerPDFBlocks(gjsEditor);
 
     // ═══ Set initial content as component definitions (NOT HTML strings) ═══
-    // This ensures editable: true is applied from the type defaults.
-    const wrapper = gjsEditor.DomComponents.getWrapper();
-    wrapper?.components().reset();
-    wrapper?.append({
-      type: 'pdf-page-root',
-      style: {
-        width: '100%',
-        'min-height': `${defaultSize.h}px`,
-        background: 'white',
-        padding: '40px',
-        'font-family': "'Inter', sans-serif",
-        'box-sizing': 'border-box',
-      },
-      components: [
-        {
-          type: 'pdf-text-comp',
-          content: 'Untitled Document',
-          attributes: { 'data-pdf-type': 'Text', 'data-pdf-size': '28' },
-          style: {
-            'font-size': '28px',
-            'font-weight': 'bold',
-            color: '#0f172a',
-            'font-family': 'Inter, sans-serif',
-            padding: '4px',
-            'margin-bottom': '8px',
-          },
-        },
-        {
-          type: 'pdf-text-comp',
-          content: 'Drag blocks from the right panel. Double-click text to edit.',
-          attributes: { 'data-pdf-type': 'Text' },
-          style: {
-            'font-size': '13px',
-            color: '#64748b',
-            'font-family': 'Inter, sans-serif',
-            padding: '4px',
-          },
-        },
-      ],
-    } as any);
-
-    // ═══ Keyboard shortcuts ═══
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === 'z') { e.preventDefault(); gjsEditor.UndoManager.undo(); }
-      if (e.ctrlKey && e.key === 'y') { e.preventDefault(); gjsEditor.UndoManager.redo(); }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        const sel = gjsEditor.getSelected();
-        if (!sel) return;
-        if ((sel.getAttributes() as any)['data-pdf-type'] === 'PageRoot') return;
-        // Don't delete while editing text
-        const iframe = gjsEditor.Canvas.getFrameEl();
-        const active = iframe?.contentDocument?.activeElement;
-        if (active?.getAttribute('contenteditable') === 'true') return;
-        e.preventDefault();
-        sel.remove();
-      }
-    };
-    document.addEventListener('keydown', keyHandler);
-
-    // ═══ Auto-switch to Properties ═══
-    gjsEditor.on('component:selected', () => setActiveTab('properties'));
-
-    // ═══ Update PageRoot when device/page-size changes ═══
-    (gjsEditor as any).on('device:select', () => {
-      const deviceName = (gjsEditor as any).getDevice();
-      const size = PAGE_SIZES[deviceName];
-      if (!size) return;
-      // PageRoot width is 100% — it auto-fills the device frame.
-      // Only update min-height for the new page dimensions.
-      const root = wrapper?.components().models.find(
-        (m: any) => m.getAttributes()['data-pdf-type'] === 'PageRoot'
-      );
-      if (root) {
-        root.setStyle({
-          ...root.getStyle(),
-          'min-height': `${size.h}px`,
-        });
-      }
-    });
-
-    // ═══ Canvas styling + TEXT EDITING via native iframe dblclick ═══
+    // We defer this to the 'load' event to ensure GrapesJS is fully initialized.
     gjsEditor.on('load', () => {
+      const wrapper = gjsEditor.DomComponents.getWrapper();
+      wrapper?.components().reset();
+      wrapper?.append({
+        type: 'pdf-page-root',
+        style: {
+          width: `${defaultSize.w}px`,
+          'min-height': `${defaultSize.h}px`,
+          background: 'white',
+          padding: '40px',
+          'font-family': "'Inter', sans-serif",
+          'box-sizing': 'border-box',
+        },
+        components: [
+          {
+            type: 'pdf-text-comp',
+            content: 'Untitled Document',
+            attributes: { 'data-pdf-type': 'Text', 'data-pdf-size': '28' },
+            style: {
+              'font-size': '28px',
+              'font-weight': 'bold',
+              color: '#0f172a',
+              'font-family': 'Inter, sans-serif',
+              padding: '4px',
+              'margin-bottom': '8px',
+            },
+          },
+          {
+            type: 'pdf-text-comp',
+            content: 'Drag blocks from the right panel. Double-click text to edit.',
+            attributes: { 'data-pdf-type': 'Text' },
+            style: {
+              'font-size': '13px',
+              color: '#64748b',
+              'font-family': 'Inter, sans-serif',
+              padding: '4px',
+            },
+          },
+        ],
+      } as any);
+      
       const frame = gjsEditor.Canvas.getFrameEl();
       if (!frame?.contentDocument) return;
 
@@ -249,6 +211,48 @@ export default function PDFEditor() {
       });
 
       gjsEditor.refresh();
+
+      // Apply the default device so the frame width and PageRoot dimensions are correct from the start
+      gjsEditor.setDevice(defaultDevice);
+    });
+
+    // ═══ Keyboard shortcuts ═══
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'z') { e.preventDefault(); gjsEditor.UndoManager.undo(); }
+      if (e.ctrlKey && e.key === 'y') { e.preventDefault(); gjsEditor.UndoManager.redo(); }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const sel = gjsEditor.getSelected();
+        if (!sel) return;
+        if ((sel.getAttributes() as any)['data-pdf-type'] === 'PageRoot') return;
+        // Don't delete while editing text
+        const iframe = gjsEditor.Canvas.getFrameEl();
+        const active = iframe?.contentDocument?.activeElement;
+        if (active?.getAttribute('contenteditable') === 'true') return;
+        e.preventDefault();
+        sel.remove();
+      }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    // ═══ Auto-switch to Properties ═══
+    gjsEditor.on('component:selected', () => setActiveTab('properties'));
+
+    // ═══ Update PageRoot when device/page-size changes ═══
+    (gjsEditor as any).on('device:select', () => {
+      const deviceName = (gjsEditor as any).getDevice();
+      const size = PAGE_SIZES[deviceName];
+      if (!size) return;
+      const wrapper = gjsEditor.DomComponents.getWrapper();
+      const root = wrapper?.components().models.find(
+        (m: any) => m.getAttributes()['data-pdf-type'] === 'PageRoot'
+      );
+      if (root) {
+        root.setStyle({
+          ...root.getStyle(),
+          'min-height': `${size.h}px`,
+          'width': `${size.w}px`,
+        });
+      }
     });
 
     (window as any).editor = gjsEditor;
@@ -278,16 +282,34 @@ export default function PDFEditor() {
         {/* Blocks + Properties */}
         <div className="w-64 bg-gray-900 flex-shrink-0 border-l border-gray-800 flex flex-col">
           <div className="flex border-b border-gray-800">
+            <button onClick={() => setActiveTab('templates')}
+              className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest transition cursor-pointer ${activeTab === 'templates' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
+              Templates
+            </button>
             <button onClick={() => setActiveTab('blocks')}
               className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest transition cursor-pointer ${activeTab === 'blocks' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
               Blocks
             </button>
             <button onClick={() => setActiveTab('properties')}
               className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest transition cursor-pointer ${activeTab === 'properties' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
-              Properties
+              Props
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
+            <div style={{ display: activeTab === 'templates' ? 'block' : 'none' }} className="p-4 space-y-4">
+               {Object.entries(PDF_TEMPLATES).map(([key, tpl]) => (
+                  <div key={key} 
+                       className="bg-gray-800 border border-gray-700 rounded p-3 cursor-pointer hover:border-indigo-500 transition"
+                       onClick={() => {
+                         if (editor && confirm('Load template? This will clear the current canvas.')) {
+                            templateToEditor(editor, tpl as any, new Map());
+                         }
+                       }}>
+                     <div className="text-sm font-semibold text-white mb-1">{tpl.manifest.name}</div>
+                     <div className="text-xs text-gray-400">Click to load preset {key} layout.</div>
+                  </div>
+               ))}
+            </div>
             <div style={{ display: activeTab === 'blocks' ? 'block' : 'none' }}>
               <div className="panel-blocks" />
             </div>

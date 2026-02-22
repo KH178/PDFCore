@@ -149,9 +149,13 @@ impl Table {
 
     #[napi]
     pub fn add_row(&mut self, row: Vec<String>) {
-        self.inner.add_row(row);
+        let cell_row: Vec<crate::core::table::TableCell> = row.into_iter().map(|s| crate::core::table::TableCell {
+            content: s,
+            colspan: 1,
+            rowspan: 1,
+        }).collect();
+        self.inner.add_row(cell_row);
     }
-    
     #[napi]
     pub fn set_font_size(&mut self, size: f64) {
         self.inner.settings.font_size = size;
@@ -255,6 +259,8 @@ impl LayoutNode {
         let col = CoreColumn {
             children: core_children,
             spacing: spacing.unwrap_or(0.0),
+            align_items: Default::default(),
+            justify_content: Default::default(),
         };
         
         LayoutNode { inner: Arc::new(col) }
@@ -269,6 +275,8 @@ impl LayoutNode {
         let row = CoreRow {
             children: core_children,
             spacing: spacing.unwrap_or(0.0),
+            align_items: Default::default(),
+            justify_content: Default::default(),
         };
         
         LayoutNode { inner: Arc::new(row) }
@@ -293,12 +301,18 @@ impl LayoutNode {
     }
     
     #[napi(factory)]
-    pub fn container(child: &LayoutNode, padding: Option<f64>, border: Option<f64>) -> Self {
+    pub fn container(child: &LayoutNode, padding: Option<f64>, margin: Option<f64>, border: Option<f64>) -> Self {
         LayoutNode {
             inner: Arc::new(CoreContainer {
                 child: child.inner.clone(),
-                padding: padding.unwrap_or(0.0),
-                border_width: border.unwrap_or(0.0),
+                padding: crate::core::layout::Spacing::uniform(padding.unwrap_or(0.0)),
+                margin: crate::core::layout::Spacing::uniform(margin.unwrap_or(0.0)),
+                border_width: crate::core::layout::Spacing::uniform(border.unwrap_or(0.0)),
+                border_color: None,
+                border_radius: 0.0,
+                background_color: None,
+                width: 0.0,
+                height: 0.0,
             }),
         }
     }
